@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "916512945621",
+    "project_id": "barberia-2f570",
+    "storage_bucket": "barberia-2f570.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:916512945621:android:8638562329d22fa75f795c",
+        "android_client_info": {
+          "package_name": "ar.edu.unaj.am.myapplication"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "916512945621-1r0bgpmio87krtcbamkonu57ibnni7gb.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "ar.edu.unaj.am.myapplication",
+            "certificate_hash": "a2356ce27927aba82e3585fce0f6dab20797b34a"
+          }
+        },
+        {
+          "client_id": "916512945621-idct92sk2j3nvsa804m69oei910idn9q.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDULvtvMxHkzqWpejG4BcghsKAdCye3R5A"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "916512945621-idct92sk2j3nvsa804m69oei910idn9q.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
