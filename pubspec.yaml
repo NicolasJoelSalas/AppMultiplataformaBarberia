@@ -40,6 +40,8 @@ dependencies:
     path: packages/core/ui
   feature_auth:
     path: packages/features/auth
+  feature_cuenta:
+    path: packages/features/cuenta
   cloud_firestore: ^7.1.0
   shared_preferences: ^2.5.3
   flutter:

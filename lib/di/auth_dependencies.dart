@@ -7,14 +7,19 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthDependencies {
-  static Future<LoginViewModel> create() async {
+  const AuthDependencies._(this.login, this.profiles);
+
+  final LoginViewModel login;
+  final ProfileRepository profiles;
+
+  static AuthDependencies create(SharedPreferences preferences) {
     final auth = FirebaseAuthRepository(FirebaseAuth.instance);
     final clientes = FirestoreClienteRepository(
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
-      await SharedPreferences.getInstance(),
+      preferences,
     );
-    return LoginViewModel(
+    final login = LoginViewModel(
       login: LoginUseCase(auth),
       register: RegisterUseCase(auth),
       loginWithGoogle: LoginWithGoogleUseCase(auth),
@@ -22,5 +27,6 @@ class AuthDependencies {
       logout: LogoutUseCase(auth, auth, clientes),
       initiallyLoggedIn: auth.isLoggedIn,
     );
+    return AuthDependencies._(login, clientes);
   }
 }

@@ -14,6 +14,9 @@ enum AuthError {
   profileSignin,
   missingEmail,
   profileLoad,
+  profilePermission,
+  profileNameLength,
+  profileSave,
   unknown,
 }
 

@@ -21,6 +21,9 @@ const _es = {
   AuthError.profileSignin: 'Iniciá sesión para completar tu perfil.',
   AuthError.missingEmail: 'La cuenta no tiene un correo asociado.',
   AuthError.profileLoad: 'No se pudo cargar tu perfil. Reintentá con conexión.',
+  AuthError.profilePermission: 'Tu cuenta no tiene acceso a este perfil.',
+  AuthError.profileNameLength: 'El nombre admite entre 1 y 120 caracteres.',
+  AuthError.profileSave: 'No se pudieron guardar los cambios.',
   AuthError.unknown: 'No se pudo completar la operación.',
 };
 const _en = {
@@ -39,5 +42,9 @@ const _en = {
   AuthError.profileSignin: 'Sign in to complete your profile.',
   AuthError.missingEmail: 'Your account has no email address.',
   AuthError.profileLoad: 'Unable to load your profile. Try again online.',
+  AuthError.profilePermission:
+      'Your account does not have access to this profile.',
+  AuthError.profileNameLength: 'Enter a name between 1 and 120 characters.',
+  AuthError.profileSave: 'Unable to save your changes.',
   AuthError.unknown: 'Unable to complete this operation.',
 };
