@@ -31,6 +31,7 @@ class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
     required this.profiles,
+    required this.services,
     required this.preferences,
     required this.onLogout,
     required this.loggingOut,
@@ -38,6 +39,7 @@ class AppShell extends StatefulWidget {
   });
 
   final ProfileRepository profiles;
+  final BarberServiceRepository services;
   final AppPreferences preferences;
   final VoidCallback onLogout;
   final bool loggingOut;
@@ -147,8 +149,11 @@ class _AppShellState extends State<AppShell> {
                             null => null,
                           },
                           onLogout: _account.saving ? null : widget.onLogout,
-                          onServices: () => _openPending(
-                            _text('Mis servicios', 'My services'),
+                          onServices: () => Navigator.of(context).push<void>(
+                            MaterialPageRoute(
+                              builder: (_) =>
+                                  ServiciosScreen(repository: widget.services),
+                            ),
                           ),
                           onLocation: () => _openPending(
                             _text(

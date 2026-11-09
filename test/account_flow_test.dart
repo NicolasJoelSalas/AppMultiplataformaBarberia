@@ -20,6 +20,7 @@ void main() {
     expect(find.text('Trabajos'), findsNothing);
     await tester.tap(find.text('Mi cuenta').last);
     await tester.pumpAndSettle();
+    expect(find.text('Mis servicios'), findsNothing);
     await tester.tap(find.text('Modificar perfil'));
     await tester.pumpAndSettle();
 
@@ -85,6 +86,64 @@ void main() {
     expect(restored.language, AppLanguage.english);
     restored.dispose();
   });
+
+  testWidgets('barber creates, edits and toggles the same service', (
+    tester,
+  ) async {
+    final services = _Services()..failSave = true;
+    await _openApp(tester, _Session(AccountRole.barber), services: services);
+    await tester.tap(find.text('Mi cuenta').last);
+    await tester.pumpAndSettle();
+    await _scrollAndTap(tester, 'Mis servicios');
+    await tester.pumpAndSettle();
+
+    expect(find.byType(NavigationBar), findsNothing);
+    await tester.tap(find.text('Agregar servicio'));
+    await tester.pumpAndSettle();
+    final fields = find.byType(TextField);
+    await tester.enterText(fields.at(0), ' Corte clásico ');
+    await tester.enterText(fields.at(1), '12500,50');
+    await tester.enterText(fields.at(2), '4');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Guardar servicio'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Revisá el nombre'), findsOneWidget);
+    expect(services.savedIds, isEmpty);
+
+    await tester.enterText(fields.at(2), '40');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Guardar servicio'));
+    await tester.pumpAndSettle();
+    expect(find.text('Revisá tu conexión a Internet.'), findsOneWidget);
+    services.failSave = false;
+    await tester.tap(find.text('Guardar servicio'));
+    await tester.pumpAndSettle();
+    expect(services.savedIds, ['service-1', 'service-1']);
+    expect(services.items['service-1']!.details.priceCents, 1250050);
+    expect(find.text('Corte clásico'), findsOneWidget);
+
+    await tester.tap(find.text('Editar'));
+    await tester.pumpAndSettle();
+    expect(find.text('12500.50'), findsOneWidget);
+    await tester.enterText(fields.at(0), 'Corte y barba');
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Guardar servicio'));
+    await tester.pumpAndSettle();
+    expect(services.items.keys, ['service-1']);
+    expect(find.text('Corte y barba'), findsOneWidget);
+
+    await tester.tap(find.text('Dar de baja'));
+    await tester.pumpAndSettle();
+    expect(find.text('¿Dar de baja este servicio?'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Dar de baja').last);
+    await tester.pumpAndSettle();
+    expect(services.items['service-1']!.active, isFalse);
+    expect(find.text('Desactivado'), findsOneWidget);
+    await tester.tap(find.text('Reactivar'));
+    await tester.pumpAndSettle();
+    expect(services.items['service-1']!.active, isTrue);
+    expect(find.text('Activo'), findsOneWidget);
+  });
 }
 
 Future<void> _scrollAndTap(WidgetTester tester, String label) async {
@@ -103,8 +162,9 @@ Future<void> _scrollAndTap(WidgetTester tester, String label) async {
 
 Future<SharedPreferences> _openApp(
   WidgetTester tester,
-  _Session session,
-) async {
+  _Session session, {
+  _Services? services,
+}) async {
   final storage = await SharedPreferences.getInstance();
   await tester.pumpWidget(
     BarberApp(
@@ -117,11 +177,49 @@ Future<SharedPreferences> _openApp(
         initiallyLoggedIn: session.isLoggedIn,
       ),
       profiles: session,
+      services: services ?? _Services(),
       preferences: AppPreferences(storage),
     ),
   );
   await tester.pumpAndSettle();
   return storage;
+}
+
+class _Services implements BarberServiceRepository {
+  final items = <String, BarberService>{};
+  final savedIds = <String>[];
+  int _nextId = 0;
+  bool failSave = false;
+
+  @override
+  String newServiceId() => 'service-${++_nextId}';
+
+  @override
+  Future<List<BarberService>> loadOwnServices() async => items.values.toList();
+
+  @override
+  Future<void> save(
+    String id,
+    ServiceDetails details, {
+    required bool create,
+  }) async {
+    savedIds.add(id);
+    if (failSave) throw ServiceFailure.network;
+    items[id] = BarberService(
+      id: id,
+      details: details,
+      active: items[id]?.active ?? true,
+    );
+  }
+
+  @override
+  Future<void> setActive(String id, bool active) async {
+    items[id] = BarberService(
+      id: id,
+      details: items[id]!.details,
+      active: active,
+    );
+  }
 }
 
 class _Session

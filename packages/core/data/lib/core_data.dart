@@ -1,4 +1,5 @@
 export 'src/repository/firestore_cliente_repository.dart';
+export 'src/repository/firestore_barber_service_repository.dart';
 
 /// A Calculator.
 class Calculator {

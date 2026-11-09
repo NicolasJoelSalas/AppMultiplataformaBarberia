@@ -7,10 +7,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthDependencies {
-  const AuthDependencies._(this.login, this.profiles);
+  const AuthDependencies._(this.login, this.profiles, this.services);
 
   final LoginViewModel login;
   final ProfileRepository profiles;
+  final BarberServiceRepository services;
 
   static AuthDependencies create(SharedPreferences preferences) {
     final auth = FirebaseAuthRepository(FirebaseAuth.instance);
@@ -27,6 +28,10 @@ class AuthDependencies {
       logout: LogoutUseCase(auth, auth, clientes),
       initiallyLoggedIn: auth.isLoggedIn,
     );
-    return AuthDependencies._(login, clientes);
+    final services = FirestoreBarberServiceRepository(
+      FirebaseFirestore.instance,
+      FirebaseAuth.instance,
+    );
+    return AuthDependencies._(login, clientes, services);
   }
 }

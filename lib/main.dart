@@ -21,6 +21,7 @@ Future<void> main() async {
       BarberApp(
         viewModel: auth.login,
         profiles: auth.profiles,
+        services: auth.services,
         preferences: AppPreferences(storage),
       ),
     );
@@ -50,11 +51,13 @@ class BarberApp extends StatefulWidget {
     super.key,
     required this.viewModel,
     required this.profiles,
+    required this.services,
     required this.preferences,
   });
 
   final LoginViewModel viewModel;
   final ProfileRepository profiles;
+  final BarberServiceRepository services;
   final AppPreferences preferences;
   @override
   State<BarberApp> createState() => _BarberAppState();
@@ -101,6 +104,7 @@ class _BarberAppState extends State<BarberApp> {
           }
           return AppShell(
             profiles: widget.profiles,
+            services: widget.services,
             preferences: widget.preferences,
             onLogout: widget.viewModel.onLogout,
             loggingOut: state.isLoading,
