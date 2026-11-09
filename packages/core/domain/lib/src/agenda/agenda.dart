@@ -104,6 +104,13 @@ class AgendaCalendar {
     return DateTime.utc(local.year, local.month, local.day);
   }
 
+  DateTime startOfDay(DateTime date) => _localTime(date, 0).native.toUtc();
+
+  int minuteOfDay(DateTime instant) {
+    final local = tz.TZDateTime.from(instant, _zone);
+    return local.hour * 60 + local.minute;
+  }
+
   DateTime mondayFor(DateTime instant, int offset) {
     if (offset < 0 || offset > 1) {
       throw const AgendaProblem(AgendaFailure.weekChanged);

@@ -23,6 +23,7 @@ Future<void> main() async {
         profiles: auth.profiles,
         services: auth.services,
         agenda: auth.agenda,
+        booking: auth.booking,
         preferences: AppPreferences(storage),
       ),
     );
@@ -54,6 +55,7 @@ class BarberApp extends StatefulWidget {
     required this.profiles,
     required this.services,
     required this.agenda,
+    required this.booking,
     required this.preferences,
   });
 
@@ -61,6 +63,7 @@ class BarberApp extends StatefulWidget {
   final ProfileRepository profiles;
   final BarberServiceRepository services;
   final AgendaRepository agenda;
+  final BookingRepository booking;
   final AppPreferences preferences;
   @override
   State<BarberApp> createState() => _BarberAppState();
@@ -109,6 +112,7 @@ class _BarberAppState extends State<BarberApp> {
             profiles: widget.profiles,
             services: widget.services,
             agenda: widget.agenda,
+            booking: widget.booking,
             preferences: widget.preferences,
             onLogout: widget.viewModel.onLogout,
             loggingOut: state.isLoading,

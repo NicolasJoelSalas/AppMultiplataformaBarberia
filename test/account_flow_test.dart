@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:barberapp/app_preferences.dart';
 import 'package:barberapp/main.dart';
 import 'package:core_ui/core_ui.dart';
@@ -9,6 +11,69 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({'app_language': 'es'}));
+
+  testWidgets('client refreshes a lost slot and both roles see the booking', (
+    tester,
+  ) async {
+    final bookings = _Bookings()
+      ..failures.addAll([BookingFailure.unavailable, BookingFailure.network]);
+    await _openApp(tester, _Session(AccountRole.client), booking: bookings);
+    await tester.tap(find.text('Turnos'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Reservar turno'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Barbero'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Barbería Centro').hitTestable().last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Servicio'));
+    await tester.pumpAndSettle();
+    await tester.tap(
+      find.textContaining('Corte clásico · ARS').hitTestable().last,
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Próxima semana'));
+    await tester.pumpAndSettle();
+
+    await _scrollAndTap(tester, '09:00 – 09:40');
+    await _confirmBooking(tester);
+    expect(
+      find.textContaining('El horario ya no está disponible'),
+      findsOneWidget,
+    );
+    await tester.tap(find.text('Actualizar disponibilidad'));
+    await tester.pumpAndSettle();
+    expect(find.text('09:00 – 09:40'), findsNothing);
+    await _scrollAndTap(tester, '09:40 – 10:20');
+    await _confirmBooking(tester);
+    expect(find.textContaining('Revisá tu conexión'), findsOneWidget);
+    await _confirmBooking(tester);
+
+    expect(bookings.requests.map((request) => request.id), [
+      'booking-1',
+      'booking-2',
+      'booking-2',
+    ]);
+    expect(bookings.requests.last.clientName, 'Alex');
+    expect(find.text('Turno reservado.'), findsOneWidget);
+    expect(find.text('Barbero · Barbería Centro'), findsOneWidget);
+    expect(find.text('09:40 – 10:20'), findsOneWidget);
+    expect(find.text('Pendiente'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await _openApp(tester, _Session(AccountRole.barber), booking: bookings);
+    await tester.tap(find.text('Turnos'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Próxima semana'));
+    await tester.pumpAndSettle();
+    expect(find.text('Cliente · Alex'), findsOneWidget);
+    expect(find.text('09:40 – 10:20'), findsOneWidget);
+    expect(find.text('Reservar turno'), findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpAndSettle();
+    await bookings.updates.close();
+  });
 
   testWidgets('client edits their profile and returns to login on sign-out', (
     tester,
@@ -200,6 +265,17 @@ Future<void> _scrollAndTap(WidgetTester tester, String label) async {
   await tester.tap(target);
 }
 
+Future<void> _confirmBooking(WidgetTester tester) async {
+  await tester.pumpAndSettle();
+  final button = find.widgetWithText(FilledButton, 'Confirmar reserva');
+  await tester.tap(button);
+  await tester.pumpAndSettle();
+  await tester.tap(
+    find.descendant(of: find.byType(AlertDialog), matching: button),
+  );
+  await tester.pumpAndSettle();
+}
+
 Future<void> _pickDefaultTime(WidgetTester tester, String field) async {
   await _scrollAndTap(tester, field);
   await tester.pumpAndSettle();
@@ -214,6 +290,7 @@ Future<SharedPreferences> _openApp(
   _Session session, {
   _Services? services,
   _Agenda? agenda,
+  BookingRepository? booking,
 }) async {
   final storage = await SharedPreferences.getInstance();
   await tester.pumpWidget(
@@ -229,11 +306,77 @@ Future<SharedPreferences> _openApp(
       profiles: session,
       services: services ?? _Services(),
       agenda: agenda ?? _Agenda(),
+      booking: booking ?? _Bookings(),
       preferences: AppPreferences(storage),
     ),
   );
   await tester.pumpAndSettle();
   return storage;
+}
+
+class _Bookings implements BookingRepository {
+  static const _zone = 'America/Argentina/Buenos_Aires';
+  final updates = StreamController<void>.broadcast();
+  final requests = <BookingRequest>[];
+  final failures = <BookingFailure>[];
+  BookingRequest? _booked;
+  int _id = 0;
+
+  @override
+  Future<List<BookingBarber>> loadBarbers() async => const [
+    BookingBarber('barber', 'Barbería Centro'),
+  ];
+
+  @override
+  Future<List<BookingService>> loadServices(String barberId) async => const [
+    BookingService('corte', 'Corte clásico', 40, 1000000),
+  ];
+
+  @override
+  Future<BookingWeek> loadWeek(
+    String barberId,
+    String serviceId,
+    int offset,
+  ) async {
+    final calendar = AgendaCalendar(_zone);
+    final monday = calendar.mondayFor(DateTime.now(), offset);
+    final first = calendar.startOfDay(monday).add(const Duration(hours: 9));
+    final start = first.add(Duration(minutes: requests.isEmpty ? 0 : 40));
+    return BookingWeek(monday, _zone, [
+      BookingSlot(start, start.add(const Duration(minutes: 40))),
+    ]);
+  }
+
+  @override
+  String newRequestId() => 'booking-${++_id}';
+
+  @override
+  Future<void> confirm(BookingRequest request) async {
+    requests.add(request);
+    if (failures.isNotEmpty) throw failures.removeAt(0);
+    _booked = request;
+    updates.add(null);
+  }
+
+  @override
+  Stream<List<Appointment>> watchAppointments(AccountRole role) async* {
+    List<Appointment> snapshot() => [
+      if (_booked case final booking?)
+        Appointment(
+          id: booking.id,
+          serviceName: 'Corte clásico',
+          participantName: role == AccountRole.client
+              ? 'Barbería Centro'
+              : booking.clientName,
+          zoneId: _zone,
+          start: booking.slot.start,
+          end: booking.slot.end,
+          status: AppointmentStatus.pending,
+        ),
+    ];
+    yield snapshot();
+    yield* updates.stream.map((_) => snapshot());
+  }
 }
 
 class _Agenda implements AgendaRepository {

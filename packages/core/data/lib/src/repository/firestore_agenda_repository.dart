@@ -203,7 +203,8 @@ class FirestoreAgendaRepository implements AgendaRepository {
       final start = data['Inicio'];
       if (start is! Timestamp ||
           !days.any((day) => day.containsStart(start.toDate())) ||
-          _AgendaBooking.isCanceled(data['Estado'])) {
+          AppointmentStatus.fromStored(data['Estado']) ==
+              AppointmentStatus.canceled) {
         continue;
       }
       final booking = _AgendaBooking.read(doc);
@@ -338,22 +339,15 @@ class _AgendaBooking {
       start = _date(doc, 'Inicio'),
       end = _date(doc, 'Fin'),
       dayId = doc.data()?['DiaId'],
-      pending = const {
-        'true',
-        'confirmado',
-        'pendiente',
-      }.contains(_status(doc.data()?['Estado']));
+      pending =
+          AppointmentStatus.fromStored(doc.data()?['Estado']) ==
+          AppointmentStatus.pending;
 
   final _Ref ref;
   final DateTime start;
   final DateTime end;
   final Object? dayId;
   final bool pending;
-
-  static String _status(Object? value) => value.toString().toLowerCase();
-
-  static bool isCanceled(Object? value) =>
-      const {'false', 'cancelado', 'cancelada'}.contains(_status(value));
 
   static DateTime _date(_Doc doc, String key) {
     final value = doc.data()?[key];

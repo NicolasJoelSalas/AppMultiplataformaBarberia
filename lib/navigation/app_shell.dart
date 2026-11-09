@@ -34,6 +34,7 @@ class AppShell extends StatefulWidget {
     required this.profiles,
     required this.services,
     required this.agenda,
+    required this.booking,
     required this.preferences,
     required this.onLogout,
     required this.loggingOut,
@@ -43,6 +44,7 @@ class AppShell extends StatefulWidget {
   final ProfileRepository profiles;
   final BarberServiceRepository services;
   final AgendaRepository agenda;
+  final BookingRepository booking;
   final AppPreferences preferences;
   final VoidCallback onLogout;
   final bool loggingOut;
@@ -58,6 +60,7 @@ class _AppShellState extends State<AppShell> {
   _Tab _tab = _Tab.home;
   bool _editing = false;
   bool _agendaOpened = false;
+  bool _appointmentsOpened = false;
 
   @override
   void initState() {
@@ -84,6 +87,21 @@ class _AppShellState extends State<AppShell> {
 
   void _goHome() => setState(() => _tab = _Tab.home);
 
+  Future<int?> _reserve(AccountProfile profile) async {
+    final offset = await Navigator.of(context).push<int>(
+      MaterialPageRoute(
+        builder: (_) => BookingScreen(
+          repository: widget.booking,
+          initialName: profile.name,
+        ),
+      ),
+    );
+    if (mounted && offset != null && profile.name.trim().isEmpty) {
+      _account.load();
+    }
+    return offset;
+  }
+
   void _openPending(String title) {
     Navigator.of(context).push<void>(
       MaterialPageRoute(builder: (_) => _PendingScreen(title: title)),
@@ -94,7 +112,7 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _account,
     builder: (context, _) {
-      if (widget.loggingOut || _account.loading) {
+      if (widget.loggingOut || (_account.loading && _account.profile == null)) {
         return _status(
           widget.loggingOut
               ? _text('Cerrando sesión…', 'Signing out…')
@@ -179,6 +197,16 @@ class _AppShellState extends State<AppShell> {
                                 onBack: _goHome,
                               )
                             : const SizedBox.shrink()
+                      : tab == _Tab.appointments
+                      ? _appointmentsOpened
+                            ? AppointmentsScreen(
+                                repository: widget.booking,
+                                role: profile.role,
+                                onReserve: barber
+                                    ? null
+                                    : () => _reserve(profile),
+                              )
+                            : const SizedBox.shrink()
                       : _PendingScreen(
                           title: tab.label(_english),
                           description: tab == _Tab.home
@@ -206,6 +234,7 @@ class _AppShellState extends State<AppShell> {
               setState(() {
                 _tab = tabs[index];
                 if (_tab == _Tab.schedule) _agendaOpened = true;
+                if (_tab == _Tab.appointments) _appointmentsOpened = true;
               });
             },
             destinations: [

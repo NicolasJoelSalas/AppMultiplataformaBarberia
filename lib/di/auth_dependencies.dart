@@ -12,12 +12,14 @@ class AuthDependencies {
     this.profiles,
     this.services,
     this.agenda,
+    this.booking,
   );
 
   final LoginViewModel login;
   final ProfileRepository profiles;
   final BarberServiceRepository services;
   final AgendaRepository agenda;
+  final BookingRepository booking;
 
   static AuthDependencies create(SharedPreferences preferences) {
     final auth = FirebaseAuthRepository(FirebaseAuth.instance);
@@ -42,6 +44,10 @@ class AuthDependencies {
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
     );
-    return AuthDependencies._(login, clientes, services, agenda);
+    final booking = FirestoreBookingRepository(
+      FirebaseFirestore.instance,
+      FirebaseAuth.instance,
+    );
+    return AuthDependencies._(login, clientes, services, agenda, booking);
   }
 }
