@@ -1,6 +1,8 @@
 import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
 
+import '../format_ars.dart';
+
 class ServiciosStrings {
   ServiciosStrings(BuildContext context)
     : _english = Localizations.localeOf(context).languageCode == 'en';
@@ -41,12 +43,8 @@ class ServiciosStrings {
   String get durationRange =>
       _text('Entre 5 y 240 minutos.', 'Between 5 and 240 minutes.');
 
-  String details(BuildContext context, ServiceDetails details) {
-    final whole = MaterialLocalizations.of(context)
-        .formatDecimal(details.priceCents ~/ 100);
-    final cents = (details.priceCents % 100).toString().padLeft(2, '0');
-    return 'ARS $whole${_english ? '.' : ','}$cents · ${details.durationMinutes} min';
-  }
+  String details(BuildContext context, ServiceDetails details) =>
+      '${formatArs(context, details.priceCents)} · ${details.durationMinutes} min';
 
   String error(ServiceFailure error) => switch (error) {
     ServiceFailure.format => _text(

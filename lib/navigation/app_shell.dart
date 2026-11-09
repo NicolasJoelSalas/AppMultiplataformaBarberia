@@ -245,18 +245,22 @@ class _AppShellState extends State<AppShell> {
                                           _reserve(profile, original: item),
                               )
                             : const SizedBox.shrink()
+                      : tab == _Tab.home && barber
+                      ? ListenableBuilder(
+                          listenable: _appointments!,
+                          builder: (context, _) => EarningsScreen(
+                            appointments: _appointments!.appointments,
+                            error: _appointments!.error,
+                            onRetry: _appointments!.retry,
+                          ),
+                        )
                       : _PendingScreen(
                           title: tab.label(_english),
                           description: tab == _Tab.home
-                              ? barber
-                                    ? _text(
-                                        'Reporte de ganancias',
-                                        'Earnings report',
-                                      )
-                                    : _text(
-                                        'Publicaciones de trabajos',
-                                        'Barbershop posts',
-                                      )
+                              ? _text(
+                                  'Publicaciones de trabajos',
+                                  'Barbershop posts',
+                                )
                               : null,
                         ),
                 ),

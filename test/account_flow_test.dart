@@ -249,6 +249,46 @@ void main() {
       expect(find.text('Realizado'), findsOneWidget);
       expect(find.textContaining('Importe cobrado'), findsOneWidget);
       expect(mark, findsNothing);
+
+      bookings.historical.add(
+        Appointment(
+          id: 'historical',
+          serviceName: 'Servicio anterior',
+          participantName: 'Cliente anterior',
+          zoneId: 'America/Argentina/Buenos_Aires',
+          start: DateTime.now(),
+          end: null,
+          status: AppointmentStatus.completed,
+        ),
+      );
+      bookings.updates.add(null);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Inicio'));
+      await tester.pumpAndSettle();
+      expect(find.text('Ganancias'), findsOneWidget);
+      expect(find.text('Ingresos de la semana'), findsOneWidget);
+      expect(find.text('Servicios realizados: 2'), findsOneWidget);
+      expect(find.text('ARS 12.500,50'), findsWidgets);
+      final partial = find.text(
+        'Turnos sin importe registrado: 1. El total es parcial.',
+      );
+      await tester.scrollUntilVisible(partial, 150);
+      expect(partial, findsOneWidget);
+      final missingRow = find.text('Sin importe');
+      await tester.scrollUntilVisible(missingRow, 150);
+      expect(missingRow, findsOneWidget);
+      final monthly = find.text('Mensual');
+      await tester.scrollUntilVisible(monthly, -220);
+      await tester.pumpAndSettle();
+      await tester.tap(monthly);
+      await tester.pumpAndSettle();
+      expect(find.text('Ingresos del mes'), findsOneWidget);
+      await tester.tap(find.byTooltip('Mes anterior'));
+      await tester.pumpAndSettle();
+      expect(find.text('Servicios realizados: 0'), findsOneWidget);
+      await tester.tap(find.text('Volver a este mes'));
+      await tester.pumpAndSettle();
+      expect(find.text('Servicios realizados: 2'), findsOneWidget);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
       await bookings.updates.close();
@@ -433,6 +473,7 @@ class _Bookings implements BookingRepository {
   final updates = StreamController<void>.broadcast();
   final requests = <BookingRequest>[];
   final failures = <BookingFailure>[];
+  final historical = <Appointment>[];
   BookingRequest? _booked;
   String? referenceUrl;
   String? canceledId;
@@ -519,6 +560,7 @@ class _Bookings implements BookingRepository {
   @override
   Stream<List<Appointment>> watchAppointments(AccountRole role) async* {
     List<Appointment> snapshot() => [
+      ...historical,
       if (_booked case final booking?)
         Appointment(
           id: booking.id,
