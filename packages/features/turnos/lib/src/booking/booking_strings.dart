@@ -23,6 +23,33 @@ class BookingStrings {
     'Cancel this appointment and release its time slot?',
   );
   String get canceled => _text('Turno cancelado.', 'Appointment canceled.');
+  String get complete => _text('Marcar realizado', 'Mark completed');
+  String get completed =>
+      _text('Turno marcado como realizado.', 'Appointment marked completed.');
+  String get saving => _text('Guardando…', 'Saving…');
+  String get completeFromStart => _text(
+    'Disponible desde la hora de inicio del turno.',
+    'Available from the appointment start time.',
+  );
+  String get noMatchingAppointments => _text(
+    'No hay turnos con el estado seleccionado para esta semana.',
+    'No appointments match this status for the selected week.',
+  );
+  String charged(int cents) => _text(
+    'Importe cobrado · ${_ars(cents)}',
+    'Amount charged · ${_ars(cents)}',
+  );
+  String filter(AppointmentStatus? value) => switch (value) {
+    null => _text('Todos', 'All'),
+    AppointmentStatus.completed => _text('Completado', 'Completed'),
+    final value => status(value),
+  };
+  String section(AppointmentStatus value) => switch (value) {
+    AppointmentStatus.pending => _text('Pendientes', 'Pending'),
+    AppointmentStatus.canceled => _text('Cancelados', 'Canceled'),
+    AppointmentStatus.completed => _text('Completados', 'Completed'),
+    AppointmentStatus.other => _text('Otros turnos', 'Other appointments'),
+  };
   String get photo => _text('Foto de referencia', 'Reference photo');
   String get addPhoto => _text('Adjuntar foto', 'Attach photo');
   String get changePhoto => _text('Cambiar foto', 'Change photo');
@@ -68,9 +95,13 @@ class BookingStrings {
     final name = item.name.isEmpty ? unknownService : item.name;
     final price = item.priceCents;
     if (price == null) return '$name · ${item.minutes} min';
-    final pesos = _material.formatDecimal(price ~/ 100);
-    final cents = (price % 100).toString().padLeft(2, '0');
-    return '$name · ARS $pesos${_english ? '.' : ','}$cents · ${item.minutes} min';
+    return '$name · ${_ars(price)} · ${item.minutes} min';
+  }
+
+  String _ars(int cents) {
+    final pesos = _material.formatDecimal(cents ~/ 100);
+    final fraction = (cents % 100).toString().padLeft(2, '0');
+    return 'ARS $pesos${_english ? '.' : ','}$fraction';
   }
 
   String interval(AgendaCalendar calendar, DateTime start, DateTime end) =>
@@ -121,6 +152,14 @@ class BookingStrings {
     BookingFailure.notEditable => _text(
       'Solo podés modificar o cancelar turnos pendientes que todavía no empezaron.',
       'You can only edit or cancel pending appointments that have not started.',
+    ),
+    BookingFailure.notCompletable => _text(
+      'Solo podés completar turnos pendientes desde su hora de inicio.',
+      'Only pending appointments that have started can be completed.',
+    ),
+    BookingFailure.invalidServicePrice => _text(
+      'El servicio necesita un precio válido para registrar el importe cobrado.',
+      'The service needs a valid price to record the amount charged.',
     ),
     BookingFailure.changed => _text(
       'El turno cambió. Volvé al listado y abrilo nuevamente.',

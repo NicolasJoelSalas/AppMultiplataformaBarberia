@@ -279,6 +279,38 @@ class FirestoreBookingRepository implements BookingRepository {
     return BookingSlot(start, end);
   }
 
+  @override
+  Future<void> complete(String id) => _run((uid) async {
+    await _firestore.runTransaction<void>((tx) async {
+      final turn = _appointments.doc(id);
+      final fields = (await tx.get(turn)).data();
+      final barber = await tx.get(_barbers.doc(uid));
+      if (fields == null ||
+          fields['BarberoId'] != uid ||
+          barber.data()?['Estado'] != true) {
+        throw BookingFailure.permission;
+      }
+      final status = AppointmentStatus.fromStored(fields['Estado']);
+      if (status == AppointmentStatus.completed) return;
+      if (status != AppointmentStatus.pending ||
+          _instant(fields['Inicio'])?.isAfter(_now()) != false) {
+        throw BookingFailure.notCompletable;
+      }
+      final serviceId = _text(fields['ServicioId']);
+      if (serviceId.trim().isEmpty || serviceId.contains('/')) {
+        throw BookingFailure.invalidServicePrice;
+      }
+      final price = (await tx.get(_services.doc(serviceId))).data()?['Precio'];
+      if (_priceCents(price) == null) throw BookingFailure.invalidServicePrice;
+      _requireUser(uid);
+      tx.update(turn, {
+        'Estado': 'realizado',
+        'PrecioCobrado': price,
+        'RealizadoEn': FieldValue.serverTimestamp(),
+      });
+    });
+  });
+
   bool _matchesOriginal(_Fields previous, Appointment original) =>
       _text(previous['BarberoId']) == original.barberId &&
       _text(previous['ServicioId']) == original.serviceId &&
@@ -358,6 +390,7 @@ class FirestoreBookingRepository implements BookingRepository {
             final zone = barber?['ZonaHoraria'];
             return Appointment(
               id: doc.id,
+              chargedPriceCents: _priceCents(record['PrecioCobrado']),
               barberId: _text(record['BarberoId']),
               serviceId: _text(record['ServicioId']),
               referenceUrl: record['ReferenciaCorteUrl'] is String
@@ -472,7 +505,7 @@ class FirestoreBookingRepository implements BookingRepository {
       doc.id,
       _text(data['NombreCorte']),
       duration,
-      price is num ? ServiceDetails.parsePriceCents(price.toString()) : null,
+      _priceCents(price),
     );
   }
 
@@ -485,6 +518,8 @@ class FirestoreBookingRepository implements BookingRepository {
   }
 
   String _text(Object? value) => value is String ? value : '';
+  int? _priceCents(Object? value) =>
+      value is num ? ServiceDetails.parsePriceCents(value.toString()) : null;
   DateTime? _instant(Object? value) =>
       value is Timestamp ? value.toDate() : null;
 

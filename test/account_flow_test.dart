@@ -59,7 +59,10 @@ void main() {
     expect(find.text('Turno reservado.'), findsOneWidget);
     expect(find.text('Barbero · Barbería Centro'), findsOneWidget);
     expect(find.text('09:40 – 10:20'), findsOneWidget);
-    expect(find.text('Pendiente'), findsOneWidget);
+    expect(
+      find.descendant(of: find.byType(Card), matching: find.text('Pendiente')),
+      findsOneWidget,
+    );
 
     await tester.pumpWidget(const SizedBox.shrink());
     await tester.pumpAndSettle();
@@ -158,7 +161,13 @@ void main() {
       await tester.tap(find.widgetWithText(FilledButton, 'Cancelar turno'));
       await tester.pumpAndSettle();
       expect(bookings.canceledId, 'original');
-      expect(find.text('Cancelado'), findsOneWidget);
+      expect(
+        find.descendant(
+          of: find.byType(Card),
+          matching: find.text('Cancelado'),
+        ),
+        findsOneWidget,
+      );
       expect(find.text('Cancelar turno'), findsNothing);
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpAndSettle();
@@ -200,6 +209,51 @@ void main() {
     expect(restored.language, AppLanguage.english);
     restored.dispose();
   });
+
+  testWidgets(
+    'barber completes an eligible appointment and badge and filters update',
+    (tester) async {
+      final bookings = _Bookings()..seed(reference: null);
+      await _openApp(tester, _Session(AccountRole.barber), booking: bookings);
+      final badge = find.byWidgetPredicate(
+        (widget) =>
+            widget is Text && widget.semanticsLabel == '1 turno pendiente',
+      );
+      expect(badge, findsWidgets);
+      await tester.tap(find.text('Turnos'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Próxima semana'));
+      await tester.pumpAndSettle();
+      final mark = find.widgetWithText(FilledButton, 'Marcar realizado');
+      expect(tester.widget<FilledButton>(mark).onPressed, isNull);
+
+      bookings.seed(startTime: DateTime.now(), reference: null);
+      bookings.updates.add(null);
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Esta semana'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Pendiente'));
+      await tester.pumpAndSettle();
+      expect(tester.widget<FilledButton>(mark).onPressed, isNotNull);
+      await _scrollAndTap(tester, 'Marcar realizado');
+      await tester.pumpAndSettle();
+
+      expect(bookings.completedId, 'original');
+      expect(badge, findsNothing);
+      expect(
+        find.text('No hay turnos con el estado seleccionado para esta semana.'),
+        findsOneWidget,
+      );
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Completado'));
+      await tester.pumpAndSettle();
+      expect(find.text('Realizado'), findsOneWidget);
+      expect(find.textContaining('Importe cobrado'), findsOneWidget);
+      expect(mark, findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await bookings.updates.close();
+    },
+  );
 
   testWidgets(
     'agenda preserves both drafts and retries a pending publication',
@@ -382,13 +436,16 @@ class _Bookings implements BookingRepository {
   BookingRequest? _booked;
   String? referenceUrl;
   String? canceledId;
+  String? completedId;
   int _id = 0;
 
-  void seed() {
+  void seed({DateTime? startTime, String? reference = 'legacy-reference'}) {
     final calendar = AgendaCalendar(_zone);
-    final start = calendar
-        .startOfDay(calendar.mondayFor(DateTime.now(), 1))
-        .add(const Duration(hours: 9));
+    final start =
+        startTime ??
+        calendar
+            .startOfDay(calendar.mondayFor(DateTime.now(), 1))
+            .add(const Duration(hours: 9));
     _booked = BookingRequest(
       id: 'original',
       barberId: 'barber',
@@ -397,7 +454,7 @@ class _Bookings implements BookingRepository {
       slot: BookingSlot(start, start.add(const Duration(minutes: 40))),
       clientName: 'Alex',
     );
-    referenceUrl = 'legacy-reference';
+    referenceUrl = reference;
   }
 
   @override
@@ -454,6 +511,12 @@ class _Bookings implements BookingRepository {
   }
 
   @override
+  Future<void> complete(String id) async {
+    completedId = id;
+    updates.add(null);
+  }
+
+  @override
   Stream<List<Appointment>> watchAppointments(AccountRole role) async* {
     List<Appointment> snapshot() => [
       if (_booked case final booking?)
@@ -462,6 +525,7 @@ class _Bookings implements BookingRepository {
           barberId: booking.barberId,
           serviceId: booking.serviceId,
           referenceUrl: referenceUrl,
+          chargedPriceCents: completedId == booking.id ? 1250050 : null,
           serviceName: 'Corte clásico',
           participantName: role == AccountRole.client
               ? 'Barbería Centro'
@@ -471,6 +535,8 @@ class _Bookings implements BookingRepository {
           end: booking.slot.end,
           status: canceledId == booking.id
               ? AppointmentStatus.canceled
+              : completedId == booking.id
+              ? AppointmentStatus.completed
               : AppointmentStatus.pending,
         ),
     ];

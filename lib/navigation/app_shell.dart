@@ -58,6 +58,7 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   late final MiCuentaViewModel _account;
+  AppointmentsViewModel? _appointments;
   final _agendaKey = GlobalKey<AgendaScreenState>();
   _Tab _tab = _Tab.home;
   bool _editing = false;
@@ -70,12 +71,25 @@ class _AppShellState extends State<AppShell> {
     _account = MiCuentaViewModel(
       loadProfile: LoadProfileUseCase(widget.profiles),
       updateName: UpdateProfileNameUseCase(widget.profiles),
-    )..load();
+    );
+    _account.addListener(_syncAppointments);
+    _account.load();
+  }
+
+  void _syncAppointments() {
+    final role = _account.profile?.role;
+    if (role == null || _appointments?.role == role) return;
+    _appointments?.dispose();
+    final model = AppointmentsViewModel(widget.booking, role);
+    _appointments = model;
+    if (role == AccountRole.barber || _appointmentsOpened) model.start();
   }
 
   @override
   void dispose() {
+    _account.removeListener(_syncAppointments);
     _account.dispose();
+    _appointments?.dispose();
     super.dispose();
   }
 
@@ -88,6 +102,23 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _goHome() => setState(() => _tab = _Tab.home);
+
+  Widget _destinationIcon(_Tab tab, IconData icon) {
+    final model = _appointments;
+    final count = model?.pendingCount ?? 0;
+    if (tab != _Tab.appointments ||
+        model?.role != AccountRole.barber ||
+        count == 0) {
+      return Icon(icon);
+    }
+    final label = count == 1
+        ? _text('1 turno pendiente', '1 pending appointment')
+        : _text('$count turnos pendientes', '$count pending appointments');
+    return Badge(
+      label: Text('$count', semanticsLabel: label),
+      child: Icon(icon),
+    );
+  }
 
   Future<int?> _reserve(AccountProfile profile, {Appointment? original}) async {
     final offset = await Navigator.of(context).push<int>(
@@ -204,8 +235,7 @@ class _AppShellState extends State<AppShell> {
                       : tab == _Tab.appointments
                       ? _appointmentsOpened
                             ? AppointmentsScreen(
-                                repository: widget.booking,
-                                role: profile.role,
+                                model: _appointments!,
                                 onReserve: barber
                                     ? null
                                     : () => _reserve(profile),
@@ -232,27 +262,34 @@ class _AppShellState extends State<AppShell> {
                 ),
             ],
           ),
-          bottomNavigationBar: NavigationBar(
-            selectedIndex: index,
-            onDestinationSelected: (index) {
-              if (_account.saving || _agendaKey.currentState?.saving == true) {
-                return;
-              }
-              FocusManager.instance.primaryFocus?.unfocus();
-              setState(() {
-                _tab = tabs[index];
-                if (_tab == _Tab.schedule) _agendaOpened = true;
-                if (_tab == _Tab.appointments) _appointmentsOpened = true;
-              });
-            },
-            destinations: [
-              for (final tab in tabs)
-                NavigationDestination(
-                  icon: Icon(tab.icon),
-                  selectedIcon: Icon(tab.selectedIcon),
-                  label: tab.label(_english),
-                ),
-            ],
+          bottomNavigationBar: ListenableBuilder(
+            listenable: _appointments!,
+            builder: (context, _) => NavigationBar(
+              selectedIndex: index,
+              onDestinationSelected: (index) {
+                if (_account.saving ||
+                    _agendaKey.currentState?.saving == true) {
+                  return;
+                }
+                FocusManager.instance.primaryFocus?.unfocus();
+                setState(() {
+                  _tab = tabs[index];
+                  if (_tab == _Tab.schedule) _agendaOpened = true;
+                  if (_tab == _Tab.appointments) {
+                    _appointmentsOpened = true;
+                    _appointments!.start();
+                  }
+                });
+              },
+              destinations: [
+                for (final tab in tabs)
+                  NavigationDestination(
+                    icon: _destinationIcon(tab, tab.icon),
+                    selectedIcon: _destinationIcon(tab, tab.selectedIcon),
+                    label: tab.label(_english),
+                  ),
+              ],
+            ),
           ),
         ),
       );

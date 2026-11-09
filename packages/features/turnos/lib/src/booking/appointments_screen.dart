@@ -1,20 +1,19 @@
 import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
 
+import 'appointments_view_model.dart';
 import 'booking_strings.dart';
 import 'reference_photo.dart';
 
 class AppointmentsScreen extends StatefulWidget {
   const AppointmentsScreen({
     super.key,
-    required this.repository,
-    required this.role,
+    required this.model,
     this.onReserve,
     this.onEdit,
   });
 
-  final BookingRepository repository;
-  final AccountRole role;
+  final AppointmentsViewModel model;
   final Future<int?> Function()? onReserve;
   final Future<int?> Function(Appointment)? onEdit;
 
@@ -23,21 +22,9 @@ class AppointmentsScreen extends StatefulWidget {
 }
 
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
-  late Stream<List<Appointment>> _appointments = _watch();
   int _offset = 0;
-  bool _canceling = false;
-
-  Stream<List<Appointment>> _watch() =>
-      widget.repository.watchAppointments(widget.role);
-
-  @override
-  void didUpdateWidget(covariant AppointmentsScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.role != widget.role ||
-        oldWidget.repository != widget.repository) {
-      _appointments = _watch();
-    }
-  }
+  AppointmentStatus? _statusFilter;
+  bool get _busy => widget.model.savingId != null;
 
   Future<void> _reserve([Appointment? original]) async {
     final offset = await (original == null
@@ -54,7 +41,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
           .showSnackBar(SnackBar(content: Text(message)));
 
   Future<void> _cancel(Appointment item) async {
-    if (_canceling) return;
+    if (_busy) return;
     final strings = BookingStrings(context);
     final confirmed = await showDialog<bool>(
       context: context,
@@ -73,25 +60,58 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         ],
       ),
     );
-    if (!mounted || confirmed != true || _canceling) return;
-    setState(() => _canceling = true);
+    if (!mounted || confirmed != true || _busy) return;
+    await _perform(() => widget.model.cancel(item), strings.canceled);
+  }
+
+  Future<void> _perform(Future<void> Function() action, String success) async {
+    if (_busy) return;
+    final strings = BookingStrings(context);
     try {
-      await widget.repository.cancel(item.id);
-      if (mounted) _message(strings.canceled);
+      await action();
+      if (mounted) _message(success);
     } on BookingFailure catch (failure) {
       if (mounted) _message(strings.error(failure));
     } catch (_) {
       if (mounted) _message(strings.error(BookingFailure.operation));
-    } finally {
-      if (mounted) setState(() => _canceling = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: widget.model,
+      builder: (context, _) => _buildList(context),
+    );
+  }
+
+  Widget _buildList(BuildContext context) {
     final strings = BookingStrings(context);
     final colors = Theme.of(context).colorScheme;
-    final barber = widget.role == AccountRole.barber;
+    final barber = widget.model.role == AccountRole.barber;
+    final now = DateTime.now();
+    final appointments = widget.model.appointments;
+    final error = widget.model.error;
+    final weekly =
+        [
+          for (final item in appointments ?? const <Appointment>[])
+            if (_inWeek(item, now)) item,
+        ]..sort((a, b) {
+          final byDistance = a.start!
+              .difference(now)
+              .inMicroseconds
+              .abs()
+              .compareTo(b.start!.difference(now).inMicroseconds.abs());
+          if (byDistance != 0) return byDistance;
+          final byTime = a.start!.compareTo(b.start!);
+          return byTime == 0 ? a.id.compareTo(b.id) : byTime;
+        });
+    final groups = <AppointmentStatus, List<Appointment>>{};
+    for (final item in weekly) {
+      if (_statusFilter == null || item.status == _statusFilter) {
+        groups.putIfAbsent(item.status, () => []).add(item);
+      }
+    }
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
@@ -105,7 +125,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               top: false,
               minimum: const EdgeInsets.all(16),
               child: FilledButton.icon(
-                onPressed: _canceling ? null : _reserve,
+                onPressed: _busy ? null : _reserve,
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(52),
                 ),
@@ -115,63 +135,81 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
             ),
       body: SafeArea(
         top: false,
-        child: StreamBuilder(
-          stream: _appointments,
-          builder: (context, snapshot) {
-            final now = DateTime.now();
-            final filtered = [
-              for (final item in snapshot.data ?? const <Appointment>[])
-                if (_inWeek(item, now)) item,
-            ]..sort((a, b) => a.start!.compareTo(b.start!));
-            return ListView(
-              padding: const EdgeInsets.all(16),
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            Wrap(
+              spacing: 8,
               children: [
-                Wrap(
-                  spacing: 8,
-                  children: [
-                    for (final (offset, label) in [
-                      strings.current,
-                      strings.next,
-                    ].indexed)
-                      ChoiceChip(
-                        label: Text(label),
-                        selected: _offset == offset,
-                        onSelected: (selected) {
-                          if (selected) setState(() => _offset = offset);
-                        },
-                      ),
-                  ],
-                ),
-                if (snapshot.hasError) ...[
-                  const SizedBox(height: 12),
-                  Text(
-                    strings.error(switch (snapshot.error) {
-                      final BookingFailure failure => failure,
-                      _ => BookingFailure.operation,
-                    }),
-                    style: TextStyle(color: colors.error),
+                for (final (offset, label) in [
+                  strings.current,
+                  strings.next,
+                ].indexed)
+                  ChoiceChip(
+                    label: Text(label),
+                    selected: _offset == offset,
+                    onSelected: (selected) {
+                      if (selected) setState(() => _offset = offset);
+                    },
                   ),
-                  Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: TextButton(
-                      onPressed: () => setState(() => _appointments = _watch()),
-                      child: Text(strings.retry),
+              ],
+            ),
+            Wrap(
+              spacing: 8,
+              children: [
+                for (final filter in const [
+                  null,
+                  AppointmentStatus.pending,
+                  AppointmentStatus.canceled,
+                  AppointmentStatus.completed,
+                ])
+                  ChoiceChip(
+                    label: Text(strings.filter(filter)),
+                    selected: _statusFilter == filter,
+                    onSelected: (_) => setState(() => _statusFilter = filter),
+                  ),
+              ],
+            ),
+            if (error != null) ...[
+              const SizedBox(height: 12),
+              Text(strings.error(error), style: TextStyle(color: colors.error)),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: TextButton(
+                  onPressed: widget.model.retry,
+                  child: Text(strings.retry),
+                ),
+              ),
+            ] else if (appointments == null)
+              const Padding(
+                padding: EdgeInsets.only(top: 12),
+                child: LinearProgressIndicator(),
+              )
+            else if (groups.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: Text(
+                  weekly.isEmpty
+                      ? strings.noAppointments
+                      : strings.noMatchingAppointments,
+                ),
+              ),
+            for (final status in AppointmentStatus.values)
+              if (groups[status] case final items?) ...[
+                Padding(
+                  padding: const EdgeInsets.only(top: 16),
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      strings.section(status),
+                      style: Theme.of(context).textTheme.titleMedium
+                          ?.copyWith(color: colors.primary),
                     ),
                   ),
-                ] else if (!snapshot.hasData)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 12),
-                    child: LinearProgressIndicator(),
-                  )
-                else if (filtered.isEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 12),
-                    child: Text(strings.noAppointments),
-                  ),
-                for (final item in filtered) _card(item, strings, barber, now),
+                ),
+                for (final item in items) _card(item, strings, barber, now),
               ],
-            );
-          },
+          ],
         ),
       ),
     );
@@ -234,6 +272,8 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     : colors.primary,
               ),
             ),
+            if (item.chargedPriceCents case final cents? when barber)
+              Text(strings.charged(cents)),
             if (item.referenceUrl case final url?) ...[
               Text(strings.photo),
               ReferencePhoto(url: url),
@@ -244,15 +284,36 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 children: [
                   if (!barber && widget.onEdit != null)
                     OutlinedButton(
-                      onPressed: _canceling ? null : () => _reserve(item),
+                      onPressed: _busy ? null : () => _reserve(item),
                       child: Text(strings.edit),
                     ),
                   TextButton(
-                    onPressed: _canceling ? null : () => _cancel(item),
+                    onPressed: _busy ? null : () => _cancel(item),
                     child: Text(strings.cancelAppointment),
                   ),
                 ],
               ),
+            if (barber && item.status == AppointmentStatus.pending) ...[
+              FilledButton.icon(
+                onPressed: !_busy && item.canCompleteAt(now)
+                    ? () => _perform(
+                        () => widget.model.complete(item),
+                        strings.completed,
+                      )
+                    : null,
+                icon: const Icon(Icons.check_circle_outline),
+                label: Text(
+                  widget.model.savingId == item.id
+                      ? strings.saving
+                      : strings.complete,
+                ),
+              ),
+              if (!item.canCompleteAt(now))
+                Text(
+                  strings.completeFromStart,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+            ],
           ],
         ),
       ),

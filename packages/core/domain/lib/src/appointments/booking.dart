@@ -12,6 +12,8 @@ enum BookingFailure implements Exception {
   serviceChanged,
   fields,
   notEditable,
+  notCompletable,
+  invalidServicePrice,
   changed,
   photoUnavailable,
   photoUpload,
@@ -179,6 +181,7 @@ class Appointment {
     this.barberId = '',
     this.serviceId = '',
     this.referenceUrl,
+    this.chargedPriceCents,
   });
   final String id;
   final String serviceName;
@@ -190,11 +193,15 @@ class Appointment {
   final String barberId;
   final String serviceId;
   final String? referenceUrl;
+  final int? chargedPriceCents;
 
   bool canChangeAt(DateTime now) =>
       status == AppointmentStatus.pending &&
       start?.isAfter(now) == true &&
       end != null;
+
+  bool canCompleteAt(DateTime now) =>
+      status == AppointmentStatus.pending && start?.isAfter(now) == false;
 }
 
 abstract interface class BookingRepository {
@@ -209,7 +216,20 @@ abstract interface class BookingRepository {
   String newRequestId();
   Future<void> confirm(BookingRequest request, {Appointment? original});
   Future<void> cancel(String id);
+  Future<void> complete(String id);
   Stream<List<Appointment>> watchAppointments(AccountRole role);
+}
+
+class CompleteAppointment {
+  const CompleteAppointment(this.repository);
+  final BookingRepository repository;
+
+  Future<void> call(Appointment appointment, DateTime now) async {
+    if (appointment.id.isEmpty || !appointment.canCompleteAt(now)) {
+      throw BookingFailure.notCompletable;
+    }
+    await repository.complete(appointment.id);
+  }
 }
 
 abstract interface class BookingPhotoRepository {
