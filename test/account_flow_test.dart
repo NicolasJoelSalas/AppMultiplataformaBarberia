@@ -18,6 +18,7 @@ void main() {
 
     expect(find.byType(NavigationDestination), findsNWidgets(3));
     expect(find.text('Trabajos'), findsNothing);
+    expect(find.text('Agenda'), findsNothing);
     await tester.tap(find.text('Mi cuenta').last);
     await tester.pumpAndSettle();
     expect(find.text('Mis servicios'), findsNothing);
@@ -86,6 +87,45 @@ void main() {
     expect(restored.language, AppLanguage.english);
     restored.dispose();
   });
+
+  testWidgets(
+    'agenda preserves both drafts and retries a pending publication',
+    (tester) async {
+      final agenda = _Agenda()..failPublish = true;
+      await _openApp(tester, _Session(AccountRole.barber), agenda: agenda);
+      await tester.tap(find.text('Agenda'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Gestionar semana'), findsOneWidget);
+      await tester.tap(find.text('Lunes'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Próxima semana'));
+      await tester.pumpAndSettle();
+      expect(find.text('Inicio · --:--'), findsNothing);
+      await tester.tap(find.text('Esta semana'));
+      await tester.pumpAndSettle();
+      expect(find.text('Inicio · --:--'), findsOneWidget);
+
+      await tester.tap(find.text('Guardar y publicar semana'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Elegí una hora válida'), findsOneWidget);
+      expect(agenda.saves, 0);
+
+      await _pickDefaultTime(tester, 'Inicio · --:--');
+      await _pickDefaultTime(tester, 'Fin · --:--');
+      await tester.tap(find.text('Guardar y publicar semana'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('La agenda se guardó'), findsOneWidget);
+      expect(agenda.saves, 1);
+      expect(agenda.publications, 1);
+      agenda.failPublish = false;
+
+      await tester.tap(find.text('Guardar y publicar semana'));
+      await tester.pumpAndSettle();
+      expect(find.text('Franjas publicadas: 1'), findsOneWidget);
+      expect(agenda.publications, 2);
+    },
+  );
 
   testWidgets('barber creates, edits and toggles the same service', (
     tester,
@@ -160,10 +200,20 @@ Future<void> _scrollAndTap(WidgetTester tester, String label) async {
   await tester.tap(target);
 }
 
+Future<void> _pickDefaultTime(WidgetTester tester, String field) async {
+  await _scrollAndTap(tester, field);
+  await tester.pumpAndSettle();
+  final dialog = find.byType(TimePickerDialog);
+  final strings = MaterialLocalizations.of(tester.element(dialog));
+  await tester.tap(find.widgetWithText(TextButton, strings.okButtonLabel));
+  await tester.pumpAndSettle();
+}
+
 Future<SharedPreferences> _openApp(
   WidgetTester tester,
   _Session session, {
   _Services? services,
+  _Agenda? agenda,
 }) async {
   final storage = await SharedPreferences.getInstance();
   await tester.pumpWidget(
@@ -178,11 +228,34 @@ Future<SharedPreferences> _openApp(
       ),
       profiles: session,
       services: services ?? _Services(),
+      agenda: agenda ?? _Agenda(),
       preferences: AppPreferences(storage),
     ),
   );
   await tester.pumpAndSettle();
   return storage;
+}
+
+class _Agenda implements AgendaRepository {
+  bool failPublish = false;
+  int saves = 0;
+  int publications = 0;
+
+  @override
+  Future<AgendaWeek> load(int offset) async => AgendaWeek(
+    monday: DateTime.utc(2026, 11, 9 + 7 * offset),
+    zoneId: 'America/Argentina/Buenos_Aires',
+    days: List.filled(6, const AgendaDay()),
+  );
+
+  @override
+  Future<void> save(AgendaWeek week) async => saves++;
+
+  @override
+  Future<void> publish(AgendaWeek week, List<AgendaAvailability> days) async {
+    publications++;
+    if (failPublish) throw const AgendaProblem(AgendaFailure.network);
+  }
 }
 
 class _Services implements BarberServiceRepository {

@@ -1,6 +1,7 @@
 import 'package:core_ui/core_ui.dart';
 import 'package:domain/domain.dart';
 import 'package:feature_cuenta/feature_cuenta.dart';
+import 'package:feature_turnos/feature_turnos.dart';
 import 'package:flutter/material.dart';
 
 import '../app_preferences.dart';
@@ -32,6 +33,7 @@ class AppShell extends StatefulWidget {
     super.key,
     required this.profiles,
     required this.services,
+    required this.agenda,
     required this.preferences,
     required this.onLogout,
     required this.loggingOut,
@@ -40,6 +42,7 @@ class AppShell extends StatefulWidget {
 
   final ProfileRepository profiles;
   final BarberServiceRepository services;
+  final AgendaRepository agenda;
   final AppPreferences preferences;
   final VoidCallback onLogout;
   final bool loggingOut;
@@ -51,8 +54,10 @@ class AppShell extends StatefulWidget {
 
 class _AppShellState extends State<AppShell> {
   late final MiCuentaViewModel _account;
+  final _agendaKey = GlobalKey<AgendaScreenState>();
   _Tab _tab = _Tab.home;
   bool _editing = false;
+  bool _agendaOpened = false;
 
   @override
   void initState() {
@@ -76,6 +81,8 @@ class _AppShellState extends State<AppShell> {
     setState(() => _editing = editing);
     _account.clearError();
   }
+
+  void _goHome() => setState(() => _tab = _Tab.home);
 
   void _openPending(String title) {
     Navigator.of(context).push<void>(
@@ -117,8 +124,10 @@ class _AppShellState extends State<AppShell> {
           if (didPop || _account.saving) return;
           if (activeTab == _Tab.account && _editing) {
             _edit(false);
+          } else if (activeTab == _Tab.schedule) {
+            _agendaKey.currentState?.requestBack();
           } else {
-            setState(() => _tab = _Tab.home);
+            _goHome();
           }
         },
         child: Scaffold(
@@ -162,6 +171,14 @@ class _AppShellState extends State<AppShell> {
                             ),
                           ),
                         )
+                      : tab == _Tab.schedule
+                      ? _agendaOpened
+                            ? AgendaScreen(
+                                key: _agendaKey,
+                                repository: widget.agenda,
+                                onBack: _goHome,
+                              )
+                            : const SizedBox.shrink()
                       : _PendingScreen(
                           title: tab.label(_english),
                           description: tab == _Tab.home
@@ -182,9 +199,14 @@ class _AppShellState extends State<AppShell> {
           bottomNavigationBar: NavigationBar(
             selectedIndex: index,
             onDestinationSelected: (index) {
-              if (_account.saving) return;
+              if (_account.saving || _agendaKey.currentState?.saving == true) {
+                return;
+              }
               FocusManager.instance.primaryFocus?.unfocus();
-              setState(() => _tab = tabs[index]);
+              setState(() {
+                _tab = tabs[index];
+                if (_tab == _Tab.schedule) _agendaOpened = true;
+              });
             },
             destinations: [
               for (final tab in tabs)

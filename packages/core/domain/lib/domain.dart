@@ -10,4 +10,5 @@ export 'src/domain_base.dart';
 export 'src/auth/auth_contracts.dart';
 export 'src/auth/auth_usecases.dart';
 export 'src/account/profile.dart';
+export 'src/agenda/agenda.dart';
 export 'src/services/barber_service.dart';
