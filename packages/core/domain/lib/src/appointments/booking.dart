@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../account/profile.dart';
 import '../agenda/agenda.dart';
 import '../services/barber_service.dart';
@@ -9,6 +11,10 @@ enum BookingFailure implements Exception {
   unavailable,
   serviceChanged,
   fields,
+  notEditable,
+  changed,
+  photoUnavailable,
+  photoUpload,
   operation,
 }
 
@@ -57,10 +63,27 @@ class BookingDay {
   final AgendaAvailability availability;
   final String occupation;
 
-  List<BookingSlot> availableSlots(int duration, DateTime now) {
+  List<BookingSlot> availableSlots(
+    int duration,
+    DateTime now, {
+    DateTime? preferred,
+  }) {
     if (duration < ServiceDetails.minDuration ||
         duration > ServiceDetails.maxDuration) {
       throw BookingFailure.serviceChanged;
+    }
+    if (preferred != null && preferred.isAfter(now)) {
+      final slot = BookingSlot(
+        preferred,
+        preferred.add(Duration(minutes: duration)),
+      );
+      try {
+        final other = BookingDay(availability, reserve(slot));
+        return [slot, ...other.availableSlots(duration, now)]
+          ..sort((a, b) => a.start.compareTo(b.start));
+      } on BookingFailure catch (error) {
+        if (error != BookingFailure.unavailable) rethrow;
+      }
     }
     final slots = <BookingSlot>[];
     final attention = availability.attention;
@@ -95,6 +118,17 @@ class BookingDay {
     }
     throw BookingFailure.unavailable;
   }
+
+  BookingDay release(BookingSlot slot) {
+    try {
+      return BookingDay(
+        availability,
+        availability.release(occupation, slot.start, slot.end),
+      );
+    } on AgendaProblem {
+      throw BookingFailure.unpublished;
+    }
+  }
 }
 
 class BookingRequest {
@@ -105,6 +139,8 @@ class BookingRequest {
     required this.zoneId,
     required this.slot,
     required this.clientName,
+    this.referenceUrl,
+    this.changeReference = false,
   });
   final String id;
   final String barberId;
@@ -112,6 +148,8 @@ class BookingRequest {
   final String zoneId;
   final BookingSlot slot;
   final String clientName;
+  final String? referenceUrl;
+  final bool changeReference;
 }
 
 enum AppointmentStatus {
@@ -138,6 +176,9 @@ class Appointment {
     required this.start,
     required this.end,
     required this.status,
+    this.barberId = '',
+    this.serviceId = '',
+    this.referenceUrl,
   });
   final String id;
   final String serviceName;
@@ -146,25 +187,61 @@ class Appointment {
   final DateTime? start;
   final DateTime? end;
   final AppointmentStatus status;
+  final String barberId;
+  final String serviceId;
+  final String? referenceUrl;
+
+  bool canChangeAt(DateTime now) =>
+      status == AppointmentStatus.pending &&
+      start?.isAfter(now) == true &&
+      end != null;
 }
 
 abstract interface class BookingRepository {
   Future<List<BookingBarber>> loadBarbers();
   Future<List<BookingService>> loadServices(String barberId);
-  Future<BookingWeek> loadWeek(String barberId, String serviceId, int offset);
+  Future<BookingWeek> loadWeek(
+    String barberId,
+    String serviceId,
+    int offset, {
+    String? editingId,
+  });
   String newRequestId();
-  Future<void> confirm(BookingRequest request);
+  Future<void> confirm(BookingRequest request, {Appointment? original});
+  Future<void> cancel(String id);
   Stream<List<Appointment>> watchAppointments(AccountRole role);
+}
+
+abstract interface class BookingPhotoRepository {
+  Future<String> upload(Uint8List image);
+}
+
+bool isBookingReferenceUrl(String value) {
+  final uri = Uri.tryParse(value);
+  return value.length <= 2048 &&
+      value.trim() == value &&
+      uri?.host == 'res.cloudinary.com' &&
+      RegExp(r'^https://res[.]cloudinary[.]com/[^/]+/image/upload/.+$')
+          .hasMatch(value);
 }
 
 class ConfirmBooking {
   const ConfirmBooking(this.repository);
   final BookingRepository repository;
 
-  Future<void> call(BookingRequest request) async {
-    final name = request.clientName.trim();
+  static String normalizeName(String value) {
+    final name = value.trim();
     if (name.isEmpty || name.length > UpdateProfileNameUseCase.maxLength) {
       throw BookingFailure.fields;
+    }
+    return name;
+  }
+
+  Future<void> call(BookingRequest request, {Appointment? original}) async {
+    final name = normalizeName(request.clientName);
+    final url = request.referenceUrl;
+    if (url != null && !isBookingReferenceUrl(url)) {
+      throw BookingFailure.photoUpload;
     }
     await repository.confirm(
       BookingRequest(
@@ -174,7 +251,10 @@ class ConfirmBooking {
         zoneId: request.zoneId,
         slot: request.slot,
         clientName: name,
+        referenceUrl: url,
+        changeReference: request.changeReference,
       ),
+      original: original,
     );
   }
 }

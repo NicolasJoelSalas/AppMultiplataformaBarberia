@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:barberapp/app_preferences.dart';
 import 'package:barberapp/main.dart';
@@ -117,6 +118,53 @@ void main() {
     expect(session.clearedUid, 'uid');
     expect(find.byType(LoginRoute), findsOneWidget);
   });
+
+  testWidgets(
+    'editing keeps the turn and its photo until removed, and barber can cancel',
+    (tester) async {
+      final bookings = _Bookings()..seed();
+      await _openApp(tester, _Session(AccountRole.client), booking: bookings);
+      await tester.tap(find.text('Turnos'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Próxima semana'));
+      await tester.pumpAndSettle();
+      await _scrollAndTap(tester, 'Modificar turno');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Corte clásico · ARS'), findsWidgets);
+      await _scrollAndTap(tester, '09:40 – 10:20');
+      await _confirmBooking(tester, 'Confirmar modificación');
+      expect(bookings.requests.single.id, 'original');
+      expect(bookings.requests.single.changeReference, isFalse);
+      expect(bookings.referenceUrl, 'legacy-reference');
+
+      await _scrollAndTap(tester, 'Modificar turno');
+      await tester.pumpAndSettle();
+      await _scrollAndTap(tester, 'Quitar foto');
+      await _confirmBooking(tester, 'Confirmar modificación');
+      expect(bookings.requests.last.changeReference, isTrue);
+      expect(bookings.referenceUrl, isNull);
+      expect(find.text('09:40 – 10:20'), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await _openApp(tester, _Session(AccountRole.barber), booking: bookings);
+      await tester.tap(find.text('Turnos'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Próxima semana'));
+      await tester.pumpAndSettle();
+      expect(find.text('Modificar turno'), findsNothing);
+      await _scrollAndTap(tester, 'Cancelar turno');
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Cancelar turno'));
+      await tester.pumpAndSettle();
+      expect(bookings.canceledId, 'original');
+      expect(find.text('Cancelado'), findsOneWidget);
+      expect(find.text('Cancelar turno'), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpAndSettle();
+      await bookings.updates.close();
+    },
+  );
 
   testWidgets('role failure is retriable and barber preferences persist', (
     tester,
@@ -265,9 +313,12 @@ Future<void> _scrollAndTap(WidgetTester tester, String label) async {
   await tester.tap(target);
 }
 
-Future<void> _confirmBooking(WidgetTester tester) async {
+Future<void> _confirmBooking(
+  WidgetTester tester, [
+  String label = 'Confirmar reserva',
+]) async {
   await tester.pumpAndSettle();
-  final button = find.widgetWithText(FilledButton, 'Confirmar reserva');
+  final button = find.widgetWithText(FilledButton, label);
   await tester.tap(button);
   await tester.pumpAndSettle();
   await tester.tap(
@@ -307,11 +358,20 @@ Future<SharedPreferences> _openApp(
       services: services ?? _Services(),
       agenda: agenda ?? _Agenda(),
       booking: booking ?? _Bookings(),
+      bookingPhotos: const _Photos(),
       preferences: AppPreferences(storage),
     ),
   );
   await tester.pumpAndSettle();
   return storage;
+}
+
+class _Photos implements BookingPhotoRepository {
+  const _Photos();
+
+  @override
+  Future<String> upload(Uint8List image) async =>
+      'https://res.cloudinary.com/demo/image/upload/example.jpg';
 }
 
 class _Bookings implements BookingRepository {
@@ -320,7 +380,25 @@ class _Bookings implements BookingRepository {
   final requests = <BookingRequest>[];
   final failures = <BookingFailure>[];
   BookingRequest? _booked;
+  String? referenceUrl;
+  String? canceledId;
   int _id = 0;
+
+  void seed() {
+    final calendar = AgendaCalendar(_zone);
+    final start = calendar
+        .startOfDay(calendar.mondayFor(DateTime.now(), 1))
+        .add(const Duration(hours: 9));
+    _booked = BookingRequest(
+      id: 'original',
+      barberId: 'barber',
+      serviceId: 'corte',
+      zoneId: _zone,
+      slot: BookingSlot(start, start.add(const Duration(minutes: 40))),
+      clientName: 'Alex',
+    );
+    referenceUrl = 'legacy-reference';
+  }
 
   @override
   Future<List<BookingBarber>> loadBarbers() async => const [
@@ -336,14 +414,22 @@ class _Bookings implements BookingRepository {
   Future<BookingWeek> loadWeek(
     String barberId,
     String serviceId,
-    int offset,
-  ) async {
+    int offset, {
+    String? editingId,
+  }) async {
     final calendar = AgendaCalendar(_zone);
     final monday = calendar.mondayFor(DateTime.now(), offset);
     final first = calendar.startOfDay(monday).add(const Duration(hours: 9));
     final start = first.add(Duration(minutes: requests.isEmpty ? 0 : 40));
     return BookingWeek(monday, _zone, [
-      BookingSlot(start, start.add(const Duration(minutes: 40))),
+      if (editingId != null) ...[
+        BookingSlot(first, first.add(const Duration(minutes: 40))),
+        BookingSlot(
+          first.add(const Duration(minutes: 40)),
+          first.add(const Duration(minutes: 80)),
+        ),
+      ] else
+        BookingSlot(start, start.add(const Duration(minutes: 40))),
     ]);
   }
 
@@ -351,10 +437,19 @@ class _Bookings implements BookingRepository {
   String newRequestId() => 'booking-${++_id}';
 
   @override
-  Future<void> confirm(BookingRequest request) async {
+  Future<void> confirm(BookingRequest request, {Appointment? original}) async {
     requests.add(request);
     if (failures.isNotEmpty) throw failures.removeAt(0);
     _booked = request;
+    if (original == null || request.changeReference) {
+      referenceUrl = request.referenceUrl;
+    }
+    updates.add(null);
+  }
+
+  @override
+  Future<void> cancel(String id) async {
+    canceledId = id;
     updates.add(null);
   }
 
@@ -364,6 +459,9 @@ class _Bookings implements BookingRepository {
       if (_booked case final booking?)
         Appointment(
           id: booking.id,
+          barberId: booking.barberId,
+          serviceId: booking.serviceId,
+          referenceUrl: referenceUrl,
           serviceName: 'Corte clásico',
           participantName: role == AccountRole.client
               ? 'Barbería Centro'
@@ -371,7 +469,9 @@ class _Bookings implements BookingRepository {
           zoneId: _zone,
           start: booking.slot.start,
           end: booking.slot.end,
-          status: AppointmentStatus.pending,
+          status: canceledId == booking.id
+              ? AppointmentStatus.canceled
+              : AppointmentStatus.pending,
         ),
     ];
     yield snapshot();

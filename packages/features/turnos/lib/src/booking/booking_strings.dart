@@ -14,6 +14,23 @@ class BookingStrings {
   String get confirm => _text('Confirmar reserva', 'Confirm booking');
   String get confirming => _text('Reservando…', 'Booking…');
   String get booked => _text('Turno reservado.', 'Appointment booked.');
+  String get edit => _text('Modificar turno', 'Edit appointment');
+  String get confirmEdit => _text('Confirmar modificación', 'Confirm changes');
+  String get edited => _text('Turno modificado.', 'Appointment updated.');
+  String get cancelAppointment => _text('Cancelar turno', 'Cancel appointment');
+  String get cancelMessage => _text(
+    '¿Querés cancelar este turno? Se liberará el horario.',
+    'Cancel this appointment and release its time slot?',
+  );
+  String get canceled => _text('Turno cancelado.', 'Appointment canceled.');
+  String get photo => _text('Foto de referencia', 'Reference photo');
+  String get addPhoto => _text('Adjuntar foto', 'Attach photo');
+  String get changePhoto => _text('Cambiar foto', 'Change photo');
+  String get removePhoto => _text('Quitar foto', 'Remove photo');
+  String get viewPhoto =>
+      _text('Ver foto de referencia', 'View reference photo');
+  String get photoError =>
+      _text('No se pudo abrir la foto.', 'Could not open the photo.');
   String get instructions => _text(
     'Seleccioná barbero, servicio y un horario disponible de lunes a sábado.',
     'Choose a barber, a service and an available time from Monday to Saturday.',
@@ -100,6 +117,22 @@ class BookingStrings {
     BookingFailure.operation => _text(
       'No se pudo completar la operación. Reintentá.',
       'Could not complete the operation. Try again.',
+    ),
+    BookingFailure.notEditable => _text(
+      'Solo podés modificar o cancelar turnos pendientes que todavía no empezaron.',
+      'You can only edit or cancel pending appointments that have not started.',
+    ),
+    BookingFailure.changed => _text(
+      'El turno cambió. Volvé al listado y abrilo nuevamente.',
+      'This appointment changed. Return to the list and open it again.',
+    ),
+    BookingFailure.photoUnavailable => _text(
+      'La carga de fotos todavía no está configurada. Podés continuar sin adjuntarla.',
+      'Photo uploads are not configured. You can continue without attaching it.',
+    ),
+    BookingFailure.photoUpload => _text(
+      'No se pudo subir la foto. Reintentá o quitá la foto para continuar.',
+      'The photo could not be uploaded. Try again or remove it to continue.',
     ),
   };
 }

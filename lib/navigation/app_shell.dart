@@ -35,6 +35,7 @@ class AppShell extends StatefulWidget {
     required this.services,
     required this.agenda,
     required this.booking,
+    required this.bookingPhotos,
     required this.preferences,
     required this.onLogout,
     required this.loggingOut,
@@ -45,6 +46,7 @@ class AppShell extends StatefulWidget {
   final BarberServiceRepository services;
   final AgendaRepository agenda;
   final BookingRepository booking;
+  final BookingPhotoRepository bookingPhotos;
   final AppPreferences preferences;
   final VoidCallback onLogout;
   final bool loggingOut;
@@ -87,12 +89,14 @@ class _AppShellState extends State<AppShell> {
 
   void _goHome() => setState(() => _tab = _Tab.home);
 
-  Future<int?> _reserve(AccountProfile profile) async {
+  Future<int?> _reserve(AccountProfile profile, {Appointment? original}) async {
     final offset = await Navigator.of(context).push<int>(
       MaterialPageRoute(
         builder: (_) => BookingScreen(
           repository: widget.booking,
+          photos: widget.bookingPhotos,
           initialName: profile.name,
+          original: original,
         ),
       ),
     );
@@ -205,6 +209,10 @@ class _AppShellState extends State<AppShell> {
                                 onReserve: barber
                                     ? null
                                     : () => _reserve(profile),
+                                onEdit: barber
+                                    ? null
+                                    : (item) =>
+                                          _reserve(profile, original: item),
                               )
                             : const SizedBox.shrink()
                       : _PendingScreen(

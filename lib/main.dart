@@ -16,7 +16,7 @@ Future<void> main() async {
   try {
     await Firebase.initializeApp();
     final storage = await SharedPreferences.getInstance();
-    final auth = AuthDependencies.create(storage);
+    final auth = await AuthDependencies.create(storage);
     runApp(
       BarberApp(
         viewModel: auth.login,
@@ -24,6 +24,7 @@ Future<void> main() async {
         services: auth.services,
         agenda: auth.agenda,
         booking: auth.booking,
+        bookingPhotos: auth.bookingPhotos,
         preferences: AppPreferences(storage),
       ),
     );
@@ -56,6 +57,7 @@ class BarberApp extends StatefulWidget {
     required this.services,
     required this.agenda,
     required this.booking,
+    required this.bookingPhotos,
     required this.preferences,
   });
 
@@ -64,6 +66,7 @@ class BarberApp extends StatefulWidget {
   final BarberServiceRepository services;
   final AgendaRepository agenda;
   final BookingRepository booking;
+  final BookingPhotoRepository bookingPhotos;
   final AppPreferences preferences;
   @override
   State<BarberApp> createState() => _BarberAppState();
@@ -113,6 +116,7 @@ class _BarberAppState extends State<BarberApp> {
             services: widget.services,
             agenda: widget.agenda,
             booking: widget.booking,
+            bookingPhotos: widget.bookingPhotos,
             preferences: widget.preferences,
             onLogout: widget.viewModel.onLogout,
             loggingOut: state.isLoading,

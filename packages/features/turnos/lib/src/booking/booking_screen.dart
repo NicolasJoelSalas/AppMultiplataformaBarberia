@@ -1,18 +1,24 @@
 import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 
 import 'booking_strings.dart';
 import 'booking_view_model.dart';
+import 'reference_photo.dart';
 
 class BookingScreen extends StatefulWidget {
   const BookingScreen({
     super.key,
     required this.repository,
+    required this.photos,
     required this.initialName,
+    this.original,
   });
 
   final BookingRepository repository;
+  final BookingPhotoRepository photos;
   final String initialName;
+  final Appointment? original;
 
   @override
   State<BookingScreen> createState() => _BookingScreenState();
@@ -22,11 +28,14 @@ class _BookingScreenState extends State<BookingScreen> {
   late final BookingViewModel _model;
   late final _name = TextEditingController(text: widget.initialName);
   final _scroll = ScrollController();
+  bool _pickingPhoto = false;
+  bool _photoError = false;
 
   @override
   void initState() {
     super.initState();
-    _model = BookingViewModel(widget.repository)..retry();
+    _model = BookingViewModel(widget.repository, widget.photos, widget.original)
+      ..initialize();
   }
 
   @override
@@ -43,12 +52,15 @@ class _BookingScreenState extends State<BookingScreen> {
     if (slot == null || week == null || _model.busy) return;
     FocusScope.of(context).unfocus();
     final strings = BookingStrings(context);
+    final action = widget.original == null
+        ? strings.confirm
+        : strings.confirmEdit;
     final calendar = AgendaCalendar(week.zoneId);
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         icon: const Icon(Icons.event_available_outlined),
-        title: Text(strings.confirm),
+        title: Text(action),
         content: Text(
           [
             _model.barber!.name,
@@ -64,7 +76,7 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text(strings.confirm),
+            child: Text(action),
           ),
         ],
       ),
@@ -79,6 +91,32 @@ class _BookingScreenState extends State<BookingScreen> {
     }
   }
 
+  Future<void> _pickPhoto() async {
+    if (_pickingPhoto || _model.confirming) return;
+    setState(() {
+      _pickingPhoto = true;
+      _photoError = false;
+    });
+    try {
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1080,
+        maxHeight: 1080,
+        requestFullMetadata: false,
+      );
+      if (!mounted || picked == null) return;
+      if (await picked.length() > 16 * 1024 * 1024) {
+        throw BookingFailure.photoUpload;
+      }
+      final bytes = await picked.readAsBytes();
+      if (mounted) _model.setPhoto(bytes);
+    } catch (_) {
+      if (mounted) setState(() => _photoError = true);
+    } finally {
+      if (mounted) setState(() => _pickingPhoto = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final strings = BookingStrings(context);
@@ -89,7 +127,9 @@ class _BookingScreenState extends State<BookingScreen> {
         canPop: !_model.confirming,
         child: Scaffold(
           appBar: AppBar(
-            title: Text(strings.reserve),
+            title: Text(
+              widget.original == null ? strings.reserve : strings.edit,
+            ),
             backgroundColor: colors.primaryContainer,
             foregroundColor: colors.onPrimaryContainer,
             leading: IconButton(
@@ -104,7 +144,9 @@ class _BookingScreenState extends State<BookingScreen> {
             top: false,
             minimum: const EdgeInsets.all(16),
             child: FilledButton.icon(
-              onPressed: _model.slot != null && !_model.busy ? _confirm : null,
+              onPressed: _model.slot != null && !_model.busy && !_pickingPhoto
+                  ? _confirm
+                  : null,
               style: FilledButton.styleFrom(
                 minimumSize: const Size.fromHeight(52),
               ),
@@ -115,7 +157,11 @@ class _BookingScreenState extends State<BookingScreen> {
                     )
                   : const Icon(Icons.event_available_outlined),
               label: Text(
-                _model.confirming ? strings.confirming : strings.confirm,
+                _model.confirming
+                    ? strings.confirming
+                    : widget.original == null
+                    ? strings.confirm
+                    : strings.confirmEdit,
               ),
             ),
           ),
@@ -137,7 +183,9 @@ class _BookingScreenState extends State<BookingScreen> {
                     strings.error(failure),
                     style: TextStyle(color: colors.error),
                   ),
-                  if (_model.slot == null)
+                  if (_model.slot == null &&
+                      failure != BookingFailure.changed &&
+                      failure != BookingFailure.notEditable)
                     Align(
                       alignment: AlignmentDirectional.centerStart,
                       child: TextButton(
@@ -222,6 +270,8 @@ class _BookingScreenState extends State<BookingScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
+                  _photoArea(strings),
+                  const SizedBox(height: 12),
                   Wrap(
                     spacing: 8,
                     children: [
@@ -247,6 +297,45 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _photoArea(BookingStrings strings) {
+    final bytes = _model.photoBytes;
+    final url = _model.existingPhoto;
+    final hasPhoto = bytes != null || url != null;
+    final enabled = !_model.confirming && !_pickingPhoto;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(strings.photo, style: Theme.of(context).textTheme.titleSmall),
+        if (hasPhoto) ReferencePhoto(url: url, bytes: bytes, enabled: enabled),
+        Wrap(
+          spacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: enabled ? _pickPhoto : null,
+              icon: const Icon(Icons.photo_outlined),
+              label: Text(hasPhoto ? strings.changePhoto : strings.addPhoto),
+            ),
+            if (hasPhoto)
+              TextButton(
+                onPressed: !enabled
+                    ? null
+                    : () {
+                        setState(() => _photoError = false);
+                        _model.setPhoto(null);
+                      },
+                child: Text(strings.removePhoto),
+              ),
+          ],
+        ),
+        if (_photoError)
+          Text(
+            strings.photoError,
+            style: TextStyle(color: Theme.of(context).colorScheme.error),
+          ),
+      ],
     );
   }
 

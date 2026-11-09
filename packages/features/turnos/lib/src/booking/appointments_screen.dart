@@ -2,6 +2,7 @@ import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
 
 import 'booking_strings.dart';
+import 'reference_photo.dart';
 
 class AppointmentsScreen extends StatefulWidget {
   const AppointmentsScreen({
@@ -9,11 +10,13 @@ class AppointmentsScreen extends StatefulWidget {
     required this.repository,
     required this.role,
     this.onReserve,
+    this.onEdit,
   });
 
   final BookingRepository repository;
   final AccountRole role;
   final Future<int?> Function()? onReserve;
+  final Future<int?> Function(Appointment)? onEdit;
 
   @override
   State<AppointmentsScreen> createState() => _AppointmentsScreenState();
@@ -22,6 +25,7 @@ class AppointmentsScreen extends StatefulWidget {
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
   late Stream<List<Appointment>> _appointments = _watch();
   int _offset = 0;
+  bool _canceling = false;
 
   Stream<List<Appointment>> _watch() =>
       widget.repository.watchAppointments(widget.role);
@@ -35,12 +39,52 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     }
   }
 
-  Future<void> _reserve() async {
-    final offset = await widget.onReserve?.call();
+  Future<void> _reserve([Appointment? original]) async {
+    final offset = await (original == null
+        ? widget.onReserve?.call()
+        : widget.onEdit?.call(original));
     if (!mounted || offset == null) return;
     setState(() => _offset = offset);
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(BookingStrings(context).booked)));
+    final strings = BookingStrings(context);
+    _message(original == null ? strings.booked : strings.edited);
+  }
+
+  void _message(String message) =>
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+
+  Future<void> _cancel(Appointment item) async {
+    if (_canceling) return;
+    final strings = BookingStrings(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(strings.cancelAppointment),
+        content: Text(strings.cancelMessage),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(strings.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(strings.cancelAppointment),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || confirmed != true || _canceling) return;
+    setState(() => _canceling = true);
+    try {
+      await widget.repository.cancel(item.id);
+      if (mounted) _message(strings.canceled);
+    } on BookingFailure catch (failure) {
+      if (mounted) _message(strings.error(failure));
+    } catch (_) {
+      if (mounted) _message(strings.error(BookingFailure.operation));
+    } finally {
+      if (mounted) setState(() => _canceling = false);
+    }
   }
 
   @override
@@ -61,7 +105,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               top: false,
               minimum: const EdgeInsets.all(16),
               child: FilledButton.icon(
-                onPressed: _reserve,
+                onPressed: _canceling ? null : _reserve,
                 style: FilledButton.styleFrom(
                   minimumSize: const Size.fromHeight(52),
                 ),
@@ -124,7 +168,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     padding: const EdgeInsets.only(top: 12),
                     child: Text(strings.noAppointments),
                   ),
-                for (final item in filtered) _card(item, strings, barber),
+                for (final item in filtered) _card(item, strings, barber, now),
               ],
             );
           },
@@ -152,7 +196,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
         date.isBefore(monday.add(const Duration(days: 7)));
   }
 
-  Widget _card(Appointment item, BookingStrings strings, bool barber) {
+  Widget _card(
+    Appointment item,
+    BookingStrings strings,
+    bool barber,
+    DateTime now,
+  ) {
     final start = item.start!;
     final end = item.end;
     final calendar = _calendar(item);
@@ -185,6 +234,25 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     : colors.primary,
               ),
             ),
+            if (item.referenceUrl case final url?) ...[
+              Text(strings.photo),
+              ReferencePhoto(url: url),
+            ],
+            if (item.canChangeAt(now))
+              Wrap(
+                spacing: 8,
+                children: [
+                  if (!barber && widget.onEdit != null)
+                    OutlinedButton(
+                      onPressed: _canceling ? null : () => _reserve(item),
+                      child: Text(strings.edit),
+                    ),
+                  TextButton(
+                    onPressed: _canceling ? null : () => _cancel(item),
+                    child: Text(strings.cancelAppointment),
+                  ),
+                ],
+              ),
           ],
         ),
       ),

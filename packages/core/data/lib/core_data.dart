@@ -2,6 +2,7 @@ export 'src/repository/firestore_cliente_repository.dart';
 export 'src/repository/firestore_barber_service_repository.dart';
 export 'src/repository/firestore_agenda_repository.dart';
 export 'src/repository/firestore_booking_repository.dart';
+export 'src/repository/cloudinary_booking_photo_repository.dart';
 
 /// A Calculator.
 class Calculator {

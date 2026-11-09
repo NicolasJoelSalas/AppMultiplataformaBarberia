@@ -47,65 +47,100 @@ class FirestoreBookingRepository implements BookingRepository {
   });
 
   @override
-  Future<BookingWeek> loadWeek(String barberId, String serviceId, int offset) =>
-      _run(
-        (uid) => _firestore.runTransaction<BookingWeek>((tx) async {
-          final barber = await tx.get(_barbers.doc(barberId));
-          final zone = _enabledZone(barber);
-          final calendar = AgendaCalendar(zone);
-          final service = _activeService(
-            await tx.get(_services.doc(serviceId)),
-            barberId,
-          );
-          if (service == null) throw BookingFailure.serviceChanged;
-
-          final now = _now();
-          final monday = calendar.mondayFor(now, offset);
-          final sources = <String, _Doc>{};
-          final slots = <BookingSlot>[];
-          for (var offset = 0; offset < 6; offset++) {
-            final date = monday.add(Duration(days: offset));
-            final doc = await tx.get(
-              _dayRef(barberId, calendar.startOfDay(date)),
-            );
-            final day = await _publishedDay(
-              tx,
-              doc,
-              barber,
-              zone,
-              calendar,
-              date,
-              sources,
-            );
-            slots.addAll(day.availableSlots(service.minutes, now));
-          }
-          _requireUser(uid);
-          return BookingWeek(monday, zone, slots);
-        }),
+  Future<BookingWeek> loadWeek(
+    String barberId,
+    String serviceId,
+    int offset, {
+    String? editingId,
+  }) => _run(
+    (uid) => _firestore.runTransaction<BookingWeek>((tx) async {
+      final barber = await tx.get(_barbers.doc(barberId));
+      final zone = _enabledZone(barber);
+      final calendar = AgendaCalendar(zone);
+      final service = _activeService(
+        await tx.get(_services.doc(serviceId)),
+        barberId,
       );
+      if (service == null) throw BookingFailure.serviceChanged;
+
+      final now = _now();
+      final monday = calendar.mondayFor(now, offset);
+      BookingSlot? previousSlot;
+      String? previousDay;
+      if (editingId != null) {
+        final previous = (await tx.get(_appointments.doc(editingId))).data();
+        if (previous?['ClienteId'] != uid) throw BookingFailure.permission;
+        final editable = _editable(previous!);
+        if (previous['BarberoId'] == barberId) {
+          previousSlot = editable;
+          previousDay =
+              _storedDayId(previous) ??
+              _dayRef(
+                barberId,
+                calendar.startOfDay(calendar.dateOf(editable.start)),
+              ).id;
+        }
+      }
+      final sources = <String, _Doc>{};
+      final slots = <BookingSlot>[];
+      for (var offset = 0; offset < 6; offset++) {
+        final date = monday.add(Duration(days: offset));
+        final doc = await tx.get(_dayRef(barberId, calendar.startOfDay(date)));
+        var day = await _publishedDay(
+          tx,
+          doc,
+          barber,
+          zone,
+          calendar,
+          date,
+          sources,
+        );
+        if (doc.id == previousDay && previousSlot != null) {
+          day = day.release(previousSlot);
+        }
+        slots.addAll(
+          day.availableSlots(
+            service.minutes,
+            now,
+            preferred: previousSlot?.start,
+          ),
+        );
+      }
+      _requireUser(uid);
+      return BookingWeek(monday, zone, slots);
+    }),
+  );
 
   @override
   String newRequestId() => _appointments.doc().id;
 
   @override
-  Future<void> confirm(BookingRequest request) => _run((uid) async {
+  Future<void> confirm(
+    BookingRequest request, {
+    Appointment? original,
+  }) => _run((uid) async {
     await _firestore.runTransaction<void>((tx) async {
       _requireUser(uid);
-      final turn = _appointments.doc(request.id);
+      final turn = _appointments.doc(original?.id ?? request.id);
       final previous = (await tx.get(turn)).data();
       final slot = request.slot;
-      if (previous != null) {
-        if (previous['ClienteId'] != uid ||
-            previous['BarberoId'] != request.barberId ||
-            previous['ServicioId'] != request.serviceId ||
-            _instant(previous['Inicio'])?.isAtSameMomentAs(slot.start) !=
-                true ||
-            _instant(previous['Fin'])?.isAtSameMomentAs(slot.end) != true ||
-            AppointmentStatus.fromStored(previous['Estado']) ==
-                AppointmentStatus.canceled) {
-          throw BookingFailure.unavailable;
+      BookingSlot? previousSlot;
+      if (original == null && previous != null) {
+        if (previous['ClienteId'] == uid &&
+            AppointmentStatus.fromStored(previous['Estado']) !=
+                AppointmentStatus.canceled &&
+            _matchesRequest(previous, request)) {
+          return;
         }
-        return;
+        throw BookingFailure.unavailable;
+      }
+      if (original != null) {
+        if (previous?['ClienteId'] != uid) throw BookingFailure.permission;
+        previousSlot = _editable(previous!);
+        if (!_matchesOriginal(previous, original)) {
+          if (_matchesRequest(previous, request)) return;
+          throw BookingFailure.changed;
+        }
       }
 
       if ((await tx.get(_barbers.doc(uid))).exists) {
@@ -139,20 +174,25 @@ class FirestoreBookingRepository implements BookingRepository {
       }
       final ref = _dayRef(request.barberId, calendar.startOfDay(date));
       final doc = await tx.get(ref);
-      final day = await _publishedDay(
-        tx,
-        doc,
-        barber,
-        zone,
-        calendar,
-        date,
-        {},
-      );
+      var day = await _publishedDay(tx, doc, barber, zone, calendar, date, {});
+      DocumentReference<_Fields>? origin;
+      String? released;
+      if (previousSlot != null) {
+        origin = await _origin(tx, previous!, previousSlot);
+        if (origin.id == ref.id) {
+          day = day.release(previousSlot);
+        } else {
+          final originalDay = _decodeDay(
+            await tx.get(origin),
+            _text(previous['BarberoId']),
+          );
+          released = originalDay.release(previousSlot).occupation;
+        }
+      }
       final occupied = day.reserve(slot);
       _requireUser(uid);
 
-      tx.set(turn, {
-        'ClienteId': uid,
+      final fields = <String, dynamic>{
         'BarberoId': request.barberId,
         'ServicioId': request.serviceId,
         'Inicio': Timestamp.fromDate(slot.start),
@@ -163,14 +203,123 @@ class FirestoreBookingRepository implements BookingRepository {
         'AgendaId': doc.data()!['AgendaId'],
         'ReservaVersion': 3,
         'DuracionMinutos': service.minutes,
-        'CreadoEn': FieldValue.serverTimestamp(),
-      });
+      };
+      if (origin == null) {
+        tx.set(turn, {
+          ...fields,
+          'ClienteId': uid,
+          'CreadoEn': FieldValue.serverTimestamp(),
+          if (request.referenceUrl != null)
+            'ReferenciaCorteUrl': request.referenceUrl,
+        });
+      } else {
+        tx.update(turn, {
+          ...fields,
+          'DiaAnteriorId': origin.id,
+          if (request.changeReference)
+            'ReferenciaCorteUrl': request.referenceUrl ?? FieldValue.delete(),
+        });
+        if (released != null) {
+          tx.update(origin, {'Ocupacion': released, 'UltimoTurnoId': turn.id});
+        }
+      }
       tx.update(ref, {'Ocupacion': occupied, 'UltimoTurnoId': turn.id});
       if (_text(client.data()?['Nombre']).trim().isEmpty) {
         tx.update(client.reference, {'Nombre': request.clientName});
       }
     });
   });
+
+  @override
+  Future<void> cancel(String id) => _run((uid) async {
+    await _firestore.runTransaction<void>((tx) async {
+      final turn = _appointments.doc(id);
+      final previous = (await tx.get(turn)).data();
+      if (previous == null ||
+          (previous['ClienteId'] != uid && previous['BarberoId'] != uid)) {
+        throw BookingFailure.permission;
+      }
+      if (AppointmentStatus.fromStored(previous['Estado']) ==
+          AppointmentStatus.canceled) {
+        return;
+      }
+      final slot = _editable(previous);
+      if (previous['BarberoId'] == uid &&
+          (await tx.get(_barbers.doc(uid))).data()?['Estado'] != true) {
+        throw BookingFailure.permission;
+      }
+      final origin = await _origin(tx, previous, slot);
+      final day = _decodeDay(
+        await tx.get(origin),
+        _text(previous['BarberoId']),
+      );
+      final occupation = day.release(slot).occupation;
+      _requireUser(uid);
+      tx.update(turn, {
+        'Estado': 'cancelado',
+        'CanceladoEn': FieldValue.serverTimestamp(),
+        'CanceladoPor': uid,
+        'DiaId': origin.id,
+        'DiaAnteriorId': origin.id,
+      });
+      tx.update(origin, {'Ocupacion': occupation, 'UltimoTurnoId': id});
+    });
+  });
+
+  BookingSlot _editable(_Fields previous) {
+    final start = _instant(previous['Inicio']);
+    final end = _instant(previous['Fin']);
+    if (AppointmentStatus.fromStored(previous['Estado']) !=
+            AppointmentStatus.pending ||
+        start == null ||
+        !start.isAfter(_now()) ||
+        end == null) {
+      throw BookingFailure.notEditable;
+    }
+    return BookingSlot(start, end);
+  }
+
+  bool _matchesOriginal(_Fields previous, Appointment original) =>
+      _text(previous['BarberoId']) == original.barberId &&
+      _text(previous['ServicioId']) == original.serviceId &&
+      _instant(previous['Inicio'])?.microsecondsSinceEpoch ==
+          original.start?.microsecondsSinceEpoch &&
+      _instant(previous['Fin'])?.microsecondsSinceEpoch ==
+          original.end?.microsecondsSinceEpoch &&
+      previous['ReferenciaCorteUrl'] == original.referenceUrl;
+
+  bool _matchesRequest(_Fields previous, BookingRequest request) =>
+      previous['BarberoId'] == request.barberId &&
+      previous['ServicioId'] == request.serviceId &&
+      _instant(previous['Inicio'])?.isAtSameMomentAs(request.slot.start) ==
+          true &&
+      _instant(previous['Fin'])?.isAtSameMomentAs(request.slot.end) == true &&
+      (!request.changeReference ||
+          previous['ReferenciaCorteUrl'] == request.referenceUrl);
+
+  String? _storedDayId(_Fields fields) {
+    final id = fields['DiaId'];
+    if (id == null) return null;
+    if (id is! String || id.isEmpty || id.contains('/')) {
+      throw BookingFailure.unpublished;
+    }
+    return id;
+  }
+
+  Future<DocumentReference<_Fields>> _origin(
+    Transaction tx,
+    _Fields previous,
+    BookingSlot slot,
+  ) async {
+    final id = _storedDayId(previous);
+    if (id != null) return _firestore.collection('disponibilidad').doc(id);
+    final barberId = _text(previous['BarberoId']);
+    if (barberId.isEmpty) throw BookingFailure.unpublished;
+    final zone = (await tx.get(_barbers.doc(barberId))).data()?['ZonaHoraria'];
+    if (zone is! String) throw BookingFailure.unpublished;
+    final calendar = AgendaCalendar(zone);
+    return _dayRef(barberId, calendar.startOfDay(calendar.dateOf(slot.start)));
+  }
 
   @override
   Stream<List<Appointment>> watchAppointments(AccountRole role) async* {
@@ -209,6 +358,11 @@ class FirestoreBookingRepository implements BookingRepository {
             final zone = barber?['ZonaHoraria'];
             return Appointment(
               id: doc.id,
+              barberId: _text(record['BarberoId']),
+              serviceId: _text(record['ServicioId']),
+              referenceUrl: record['ReferenciaCorteUrl'] is String
+                  ? record['ReferenciaCorteUrl'] as String
+                  : null,
               serviceName: _text(
                 services[record['ServicioId']]?['NombreCorte'],
               ),
@@ -263,32 +417,40 @@ class FirestoreBookingRepository implements BookingRepository {
   ) async {
     final fields = doc.data();
     final agendaId = fields?['AgendaId'];
-    final start = _instant(fields?['Inicio']);
-    final end = _instant(fields?['Fin']);
-    final attention = fields?['Atencion'];
-    final occupation = fields?['Ocupacion'];
+    final day = _decodeDay(doc, barber.id);
     if (fields == null ||
-        fields['BarberoId'] != barber.id ||
         fields['ZonaHoraria'] != zone ||
         barber.data()?['ReservasVersion'] != 3 ||
         (fields['PublicacionPendiente'] ?? false) != false ||
         agendaId is! String ||
         agendaId.isEmpty ||
         agendaId.contains('/') ||
-        start == null ||
-        !start.isAtSameMomentAs(calendar.startOfDay(date)) ||
-        end == null ||
-        !end.isAtSameMomentAs(
+        !day.availability.start.isAtSameMomentAs(calendar.startOfDay(date)) ||
+        !day.availability.end.isAtSameMomentAs(
           calendar.startOfDay(date.add(const Duration(days: 1))),
-        ) ||
-        attention is! String ||
-        occupation is! String) {
+        )) {
       throw BookingFailure.unpublished;
     }
     final source = sources[agendaId] ??= await tx.get(
       barber.reference.collection('agenda').doc(agendaId),
     );
     if (!source.exists || !_equality.equals(fields['Agenda'], source.data())) {
+      throw BookingFailure.unpublished;
+    }
+    return day;
+  }
+
+  BookingDay _decodeDay(_Doc doc, String barberId) {
+    final fields = doc.data();
+    final start = _instant(fields?['Inicio']);
+    final end = _instant(fields?['Fin']);
+    final attention = fields?['Atencion'];
+    final occupation = fields?['Ocupacion'];
+    if (fields?['BarberoId'] != barberId ||
+        start == null ||
+        end == null ||
+        attention is! String ||
+        occupation is! String) {
       throw BookingFailure.unpublished;
     }
     return BookingDay(AgendaAvailability(start, end, attention), occupation);

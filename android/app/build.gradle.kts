@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("com.google.gms.google-services")
@@ -5,10 +7,24 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+val cloudinaryProperties = Properties().apply {
+    val config = rootProject.file("local.properties")
+    if (config.isFile) config.inputStream().use { load(it) }
+}
+
+fun cloudinaryValue(key: String): String = cloudinaryProperties.getProperty(key, "")
+    .trim()
+    .takeIf { it.matches(Regex("[A-Za-z0-9_-]+")) }
+    .orEmpty()
+
 android {
     namespace = "com.example.barberapp"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
+
+    buildFeatures {
+        resValues = true
+    }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -28,6 +44,8 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        resValue("string", "cloudinary_cloud_name", cloudinaryValue("cloudinary.cloudName"))
+        resValue("string", "cloudinary_upload_preset", cloudinaryValue("cloudinary.uploadPreset"))
     }
 
     buildTypes {

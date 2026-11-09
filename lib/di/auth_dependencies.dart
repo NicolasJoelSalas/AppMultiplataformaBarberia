@@ -4,6 +4,8 @@ import 'package:core_data/core_data.dart';
 import 'package:domain/domain.dart';
 import 'package:feature_auth/feature_auth.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthDependencies {
@@ -13,6 +15,7 @@ class AuthDependencies {
     this.services,
     this.agenda,
     this.booking,
+    this.bookingPhotos,
   );
 
   final LoginViewModel login;
@@ -20,8 +23,9 @@ class AuthDependencies {
   final BarberServiceRepository services;
   final AgendaRepository agenda;
   final BookingRepository booking;
+  final BookingPhotoRepository bookingPhotos;
 
-  static AuthDependencies create(SharedPreferences preferences) {
+  static Future<AuthDependencies> create(SharedPreferences preferences) async {
     final auth = FirebaseAuthRepository(FirebaseAuth.instance);
     final clientes = FirestoreClienteRepository(
       FirebaseFirestore.instance,
@@ -48,6 +52,41 @@ class AuthDependencies {
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
     );
-    return AuthDependencies._(login, clientes, services, agenda, booking);
+    return AuthDependencies._(
+      login,
+      clientes,
+      services,
+      agenda,
+      booking,
+      await _createBookingPhotos(),
+    );
+  }
+
+  static Future<BookingPhotoRepository> _createBookingPhotos() async {
+    const cloudName = String.fromEnvironment('CLOUDINARY_CLOUD_NAME');
+    const uploadPreset = String.fromEnvironment('CLOUDINARY_UPLOAD_PRESET');
+    const fromDefines = CloudinaryBookingPhotoRepository(
+      cloudName,
+      uploadPreset,
+    );
+    if (cloudName.isNotEmpty ||
+        uploadPreset.isNotEmpty ||
+        kIsWeb ||
+        defaultTargetPlatform != TargetPlatform.android) {
+      return fromDefines;
+    }
+
+    try {
+      final config = await const MethodChannel('barberapp/cloudinary')
+          .invokeMapMethod<String, String>('read');
+      return CloudinaryBookingPhotoRepository(
+        config?['cloudName'] ?? '',
+        config?['uploadPreset'] ?? '',
+      );
+    } on MissingPluginException {
+      return fromDefines;
+    } on PlatformException {
+      return fromDefines;
+    }
   }
 }
