@@ -8,6 +8,7 @@ class WorkViewModel extends ChangeNotifier {
 
   final WorkRepository _repository;
   final SaveWorkPost _save;
+  late final _drafts = _repository.openDrafts();
   StreamSubscription<WorkFeed>? _subscription;
   WorkFeed? feed;
   bool failed = false;
@@ -35,8 +36,25 @@ class WorkViewModel extends ChangeNotifier {
   Future<Uint8List?> readImage(WorkPost post) =>
       _repository.readImage(post, offline: offline);
 
-  Future<void> save(String id, String description, {Uint8List? image}) =>
-      _save(id, description, image: image);
+  Future<WorkDraft?> readDraft() => _drafts.read();
+
+  Future<void> saveDraft(WorkDraft draft) => _drafts.save(draft);
+
+  Future<void> discardDraft() => _drafts.discard();
+
+  Future<void> editDescription(WorkPost post, String description) =>
+      _save(post.id, description);
+
+  Future<void> publish(WorkDraft draft) async {
+    final photo = draft.photo;
+    if (photo == null) throw StateError('Missing photo');
+    await _save(
+      draft.id,
+      draft.description,
+      image: photo,
+      framing: draft.framing,
+    );
+  }
 
   Future<void> delete(WorkPost post) => _repository.delete(post.id);
 

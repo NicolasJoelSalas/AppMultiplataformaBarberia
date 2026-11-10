@@ -18,19 +18,22 @@ class CloudinaryBookingPhotoRepository implements BookingPhotoRepository {
   @override
   Future<String> upload(Uint8List bytes) async => (await _upload(bytes)).url;
 
-  Future<CloudinaryPhoto> uploadPhoto(Uint8List bytes) =>
-      _upload(bytes, requirePublicId: true);
+  Future<CloudinaryPhoto> uploadPhoto(
+    Uint8List bytes, {
+    required WorkFraming framing,
+  }) => _upload(bytes, requirePublicId: true, framing: framing);
 
   Future<CloudinaryPhoto> _upload(
     Uint8List bytes, {
     bool requirePublicId = false,
+    WorkFraming? framing,
   }) async {
     if (!RegExp(r'^[a-zA-Z0-9_-]+$').hasMatch(cloudName) ||
         !RegExp(r'^[a-zA-Z0-9_-]+$').hasMatch(uploadPreset)) {
       throw BookingFailure.photoUnavailable;
     }
     try {
-      final jpeg = await _prepareJpeg(bytes);
+      final jpeg = await _prepareJpeg(bytes, framing);
       final data = await const NetworkClient().uploadJpeg(
         Uri.https('api.cloudinary.com', '/v1_1/$cloudName/image/upload'),
         jpeg,
@@ -64,14 +67,15 @@ class CloudinaryPhoto {
   final String publicId;
 }
 
-Future<Uint8List> _prepareJpeg(Uint8List bytes) async {
+Future<Uint8List> _prepareJpeg(Uint8List bytes, WorkFraming? framing) async {
   final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
   try {
     final descriptor = await ui.ImageDescriptor.encoded(buffer);
     try {
       final scale = math.min(
         1.0,
-        1080 / math.max(descriptor.width, descriptor.height),
+        (framing == null ? 1080 : 2048) /
+            math.max(descriptor.width, descriptor.height),
       );
       final codec = await descriptor.instantiateCodec(
         targetWidth: math.max(1, (descriptor.width * scale).round()),
@@ -88,6 +92,7 @@ Future<Uint8List> _prepareJpeg(Uint8List bytes) async {
             pixels.buffer,
             frame.width,
             frame.height,
+            framing,
           ));
         } finally {
           frame.dispose();
@@ -103,15 +108,29 @@ Future<Uint8List> _prepareJpeg(Uint8List bytes) async {
   }
 }
 
-Uint8List _encodeJpeg((ByteBuffer, int, int) input) {
-  final (bytes, width, height) = input;
-  return image.encodeJpg(
-    image.Image.fromBytes(
-      width: width,
-      height: height,
-      bytes: bytes,
-      order: image.ChannelOrder.rgba,
-    ),
-    quality: 85,
+Uint8List _encodeJpeg((ByteBuffer, int, int, WorkFraming?) input) {
+  final (bytes, width, height, framing) = input;
+  var photo = image.Image.fromBytes(
+    width: width,
+    height: height,
+    bytes: bytes,
+    order: image.ChannelOrder.rgba,
   );
+  if (framing != null) {
+    final side = math.min(width, height);
+    final square = image.copyCrop(
+      photo,
+      x: ((width - side) * (framing.horizontal + 1) / 2).round(),
+      y: ((height - side) * (framing.vertical + 1) / 2).round(),
+      width: side,
+      height: side,
+    );
+    photo = image.copyResize(
+      square,
+      width: 1080,
+      height: 1080,
+      interpolation: image.Interpolation.linear,
+    );
+  }
+  return image.encodeJpg(photo, quality: 85);
 }

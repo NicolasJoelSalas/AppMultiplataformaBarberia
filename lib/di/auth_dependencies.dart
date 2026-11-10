@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../notifications/android_push_registration.dart';
 import '../notifications/appointment_alert_controller.dart';
 import '../notifications/appointment_alerts.dart';
 import '../notifications/web_appointment_alerts.dart';
@@ -121,6 +122,13 @@ class AuthDependencies {
       session,
       booking,
       preferences,
+      AndroidPushRegistration(
+        FirebasePushDevices(
+          FirebaseFirestore.instance,
+          FirebaseAuth.instance,
+          preferences,
+        ),
+      ),
     );
     try {
       await controller.initialize();

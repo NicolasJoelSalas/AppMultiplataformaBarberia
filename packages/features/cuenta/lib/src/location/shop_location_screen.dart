@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
@@ -29,6 +31,7 @@ class _ShopLocationScreenState extends State<ShopLocationScreen>
   final _map = MapController();
   late final ShopLocationViewModel _model;
   bool _mapReady = false;
+  bool _confirmingExit = false;
   bool _followCamera = true;
   MapPoint? _lastCentered;
   ShopRoute? _lastRoute;
@@ -118,6 +121,38 @@ class _ShopLocationScreenState extends State<ShopLocationScreen>
     }
   }
 
+  Future<void> _confirmExit() async {
+    if (_model.saving || !_model.hasUnsavedLocation || _confirmingExit) return;
+    _confirmingExit = true;
+    final discard = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(
+          _text(
+            '¿Descartar la ubicación elegida?',
+            'Discard the selected location?',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(_text('Seguir editando', 'Keep editing')),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(_text('Descartar', 'Discard')),
+          ),
+        ],
+      ),
+    );
+    _confirmingExit = false;
+    if (discard == true &&
+        mounted &&
+        ModalRoute.of(context)?.isCurrent == true) {
+      Navigator.of(context).pop();
+    }
+  }
+
   Future<void> _action() async {
     if (_model.editing) {
       await _model.save();
@@ -173,7 +208,7 @@ class _ShopLocationScreenState extends State<ShopLocationScreen>
         ),
         null => null,
       };
-      return Scaffold(
+      final screen = Scaffold(
         appBar: AppBar(
           title: Text(
             editing
@@ -330,7 +365,12 @@ class _ShopLocationScreenState extends State<ShopLocationScreen>
                       ),
                     ),
                   FilledButton(
-                    onPressed: canSelect && !_model.routing && selected != null
+                    onPressed:
+                        canSelect &&
+                            !_model.routing &&
+                            (editing
+                                ? _model.hasUnsavedLocation
+                                : selected != null)
                         ? _action
                         : null,
                     child: Text(
@@ -344,6 +384,13 @@ class _ShopLocationScreenState extends State<ShopLocationScreen>
             ),
           ],
         ),
+      );
+      return PopScope(
+        canPop: !_model.saving && !_model.hasUnsavedLocation,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) unawaited(_confirmExit());
+        },
+        child: screen,
       );
     },
   );

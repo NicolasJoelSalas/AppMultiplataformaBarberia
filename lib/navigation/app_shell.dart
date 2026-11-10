@@ -385,6 +385,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       repository: widget.work,
                       title: tab.label(_english),
                       barber: barber,
+                      active: tab == activeTab,
                       onReserve: (id) => _reserveFromWork(profile, id),
                       onDirections: _openLocation,
                     ),

@@ -25,7 +25,9 @@ class ShopLocationViewModel extends ChangeNotifier {
   ShopRoute? route;
   double? remainingMeters;
   LocationFailure? failure;
-  bool busy = false;
+  LocationFailure? _activeOperation;
+  bool get busy => _activeOperation != null;
+  bool get saving => _activeOperation == LocationFailure.save;
   bool loaded = false;
   bool tracking = false;
   bool waitingForFix = false;
@@ -38,6 +40,13 @@ class ShopLocationViewModel extends ChangeNotifier {
   StreamSubscription<DeviceLocationFix>? _positions;
 
   bool get editing => barberId == null;
+
+  bool get hasUnsavedLocation =>
+      editing &&
+      loaded &&
+      selected != null &&
+      (selected!.latitude != destination?.latitude ||
+          selected!.longitude != destination?.longitude);
 
   Future<void> load() => _run(LocationFailure.load, () async {
     destination = await locations.read(barberId: barberId);
@@ -163,11 +172,14 @@ class ShopLocationViewModel extends ChangeNotifier {
     _positions = null;
   }
 
-  Future<void> save() => _run(LocationFailure.save, () async {
+  Future<void> save() async {
+    if (!hasUnsavedLocation) return;
     final point = selected!;
-    await SaveShopLocation(locations)(point);
-    destination = point;
-  });
+    await _run(LocationFailure.save, () async {
+      await SaveShopLocation(locations)(point);
+      destination = point;
+    });
+  }
 
   Future<void> calculate() async {
     final origin = selected;
@@ -208,7 +220,7 @@ class ShopLocationViewModel extends ChangeNotifier {
 
   Future<void> _run(LocationFailure kind, Future<void> Function() task) async {
     if (busy || _disposed) return;
-    busy = true;
+    _activeOperation = kind;
     failure = null;
     notifyListeners();
     try {
@@ -216,7 +228,7 @@ class ShopLocationViewModel extends ChangeNotifier {
     } catch (_) {
       failure = kind;
     } finally {
-      busy = false;
+      _activeOperation = null;
       if (!_disposed) notifyListeners();
     }
   }

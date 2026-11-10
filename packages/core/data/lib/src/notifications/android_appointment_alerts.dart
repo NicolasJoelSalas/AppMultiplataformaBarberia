@@ -24,9 +24,14 @@ class AndroidAppointmentAlerts {
 
   Future<Database> _database() => _opening ??= openDatabase(
     'appointment_alerts.db',
-    version: 2,
+    version: 3,
     onUpgrade: (db, from, _) async {
       if (from < 2) await _createReminderPreferences(db);
+      if (from < 3) {
+        await db.execute(
+          "ALTER TABLE $_session ADD COLUMN push_events TEXT NOT NULL DEFAULT '[]'",
+        );
+      }
     },
     onCreate: (db, _) async {
       await db.execute('''
@@ -36,7 +41,8 @@ class AndroidAppointmentAlerts {
         role TEXT NOT NULL,
         english INTEGER NOT NULL,
         baseline TEXT,
-        next_id INTEGER NOT NULL DEFAULT 1
+        next_id INTEGER NOT NULL DEFAULT 1,
+        push_events TEXT NOT NULL DEFAULT '[]'
       )
     ''');
       await _createReminderPreferences(db);
@@ -174,6 +180,57 @@ class AndroidAppointmentAlerts {
     }
     return _readDisabled(tx, uid);
   });
+
+  Future<void> showRemote(
+    String uid,
+    String body, {
+    String? title,
+    String? eventId,
+    required bool Function() isCurrent,
+  }) async {
+    await (await _database()).transaction((tx) async {
+      final state = await _active(tx);
+      if (state == null ||
+          state['uid'] != uid ||
+          state['role'] != AccountRole.barber.name ||
+          !isCurrent() ||
+          !await notificationsEnabled() ||
+          !isCurrent()) {
+        return;
+      }
+
+      final events = (jsonDecode(state['push_events'] as String) as List)
+          .cast<String>();
+      if (eventId != null && events.contains(eventId)) return;
+      var id = state['next_id'] as int;
+      for (final pending
+          in await _notifications.pendingNotificationRequests()) {
+        if (pending.id >= id) id = pending.id + 1;
+      }
+      if (!isCurrent()) return;
+      final text = _noticeText(
+        AppointmentNotice.updated,
+        state['english'] == 1,
+        null,
+      );
+      await _notifications.show(
+        id: id,
+        title: title == null || title.isEmpty ? text.channel : title,
+        body: body,
+        notificationDetails: _details(reminder: false, channel: text.channel),
+        payload: jsonEncode([uid, eventId]),
+      );
+
+      if (eventId != null) {
+        events.add(eventId);
+        if (events.length > 100) events.removeAt(0);
+      }
+      await tx.update(_session, {
+        'next_id': id + 1,
+        'push_events': jsonEncode(events),
+      });
+    });
+  }
 
   Future<void> sync(String uid) async {
     await (await _database()).transaction((tx) async {

@@ -22,6 +22,7 @@ dependencies:
   cloud_firestore: ^7.1.0
   collection: ^1.19.1
   firebase_auth: ^7.0.1
+  firebase_messaging: ^17.0.1
   network:
     path: ../network
   image: ^4.3.0

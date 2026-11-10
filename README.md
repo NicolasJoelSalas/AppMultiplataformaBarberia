@@ -56,6 +56,12 @@ flutter build web --dart-define-from-file=web_config.local.json
 
 El navegador permite elegir fotos desde archivos. El GPS depende del permiso de ubicación y de un origen seguro como HTTPS o localhost. Con la app abierta, se pueden consultar los turnos, trabajos y fotos guardados en ese navegador. Los recordatorios y novedades aparecen dentro de la página mientras está abierta. Para recibirlos con el navegador cerrado haría falta habilitar avisos push y programarlos desde un servidor.
 
+## Mensajes remotos en Android
+
+Al iniciar sesión como barbero habilitado, la app registra el token FCM de la instalación en `barberos/{uid}/dispositivos/{instalacionId}`. Actualiza el registro si cambia el token e intenta desvincularlo al salir. El receptor valida que el mensaje esté dirigido al barbero de la sesión activa. Al tocar el aviso se abre **Turnos**.
+
+El emisor debe usar mensajes FCM de **solo datos** con `barberoId` y `texto`. También puede incluir `titulo` y `eventoId` para identificar el aviso y evitar repeticiones. Con un bloque `notification`, Android puede mostrar el mensaje automáticamente antes de que la app lo valide. El registro del token y el receptor son del lado de la app. El envío requiere un emisor autorizado con Firebase Admin SDK o la API HTTP v1 de FCM.
+
 ## Trabajos, ubicación y turnos en Android
 
 - **Trabajos.** El barbero publica desde cámara o galería y administra sus publicaciones. El cliente ve el feed en Inicio y abre una reserva con el barbero seleccionado. Firestore usa los mismos campos y reglas del proyecto Kotlin. Al eliminar un trabajo, se retira del feed. Cloudinary conserva el archivo alojado.

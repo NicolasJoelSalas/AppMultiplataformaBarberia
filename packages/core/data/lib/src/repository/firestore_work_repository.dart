@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'account_cache_writes.dart';
 import 'cloudinary_booking_photo_repository.dart';
+import 'local_work_draft_store.dart';
 import 'work_image_cache.dart';
 
 class FirestoreWorkRepository implements WorkRepository {
@@ -26,6 +27,7 @@ class FirestoreWorkRepository implements WorkRepository {
   final SharedPreferences _storage;
   final _images = const WorkImageCache();
   final _cacheWrites = AccountCacheWrites();
+  final _drafts = LocalWorkDraftStore();
   final _uploads = <String, Future<CloudinaryPhoto>>{};
   final _downloads = <String, Future<Uint8List?>>{};
   final _prefetching = <String, Future<void>>{};
@@ -44,6 +46,7 @@ class FirestoreWorkRepository implements WorkRepository {
     await Future.wait([
       _storage.remove(_cacheKey(uid)),
       _images.clear(_fileComponent(uid)),
+      _drafts.clear(uid),
     ]);
   }
 
@@ -241,7 +244,23 @@ class FirestoreWorkRepository implements WorkRepository {
   String newPostId() => _posts.doc().id;
 
   @override
-  Future<void> publish(String id, Uint8List image, String description) async {
+  WorkDraftRepository openDrafts() {
+    final uid = _uid;
+    final generation = _cacheWrites.generation(uid);
+    return SessionWorkDraftRepository(
+      _drafts,
+      uid,
+      () => _isCurrent(uid, generation),
+    );
+  }
+
+  @override
+  Future<void> publish(
+    String id,
+    Uint8List image,
+    String description, {
+    required WorkFraming framing,
+  }) async {
     final uid = _uid;
     final barber = _firestore.collection('barberos').doc(uid);
     final ref = _posts.doc(id);
@@ -249,18 +268,22 @@ class FirestoreWorkRepository implements WorkRepository {
       throw StateError('Only active barbers can publish');
     }
     final existing = await ref.get(_server);
-    final key = '$uid/$id';
+    final prefix = '$uid/$id/';
+    final key = '$prefix${framing.horizontal}/${framing.vertical}';
     if (existing.exists) {
       if (existing.data()?['BarberoId'] != uid) {
         throw StateError('Invalid owner');
       }
-      _uploads.remove(key);
+      _uploads.removeWhere((key, _) => key.startsWith(prefix));
       return;
     }
     if (!_uploads.containsKey(key) && _uploads.length >= 20) {
       _uploads.remove(_uploads.keys.first);
     }
-    final upload = _uploads.putIfAbsent(key, () => _photos.uploadPhoto(image));
+    final upload = _uploads.putIfAbsent(
+      key,
+      () => _photos.uploadPhoto(image, framing: framing),
+    );
     final CloudinaryPhoto photo;
     try {
       photo = await upload;
@@ -289,7 +312,7 @@ class FirestoreWorkRepository implements WorkRepository {
         'CreadoEn': FieldValue.serverTimestamp(),
       });
     });
-    _uploads.remove(key);
+    _uploads.removeWhere((key, _) => key.startsWith(prefix));
   }
 
   Future<void> _change(String id, {String? description}) async {

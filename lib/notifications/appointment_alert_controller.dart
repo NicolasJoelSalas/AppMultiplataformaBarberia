@@ -6,11 +6,14 @@ import 'package:core_ui/core_ui.dart';
 import 'package:domain/domain.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:workmanager/workmanager.dart';
 
+import 'android_push_registration.dart';
 import 'appointment_alerts.dart';
+import 'firebase_push_receiver.dart';
 
 const _alertTask = 'appointment-alerts';
 
@@ -38,13 +41,19 @@ void appointmentAlertsDispatcher() {
 }
 
 class AppointmentAlertController extends AppointmentAlerts {
-  AppointmentAlertController(this._session, this._bookings, this._storage)
-    : _alerts = AndroidAppointmentAlerts(_bookings, appointmentNoticeText);
+  AppointmentAlertController(
+    this._session,
+    this._bookings,
+    this._storage,
+    this._push,
+  ) : _alerts = AndroidAppointmentAlerts(_bookings, appointmentNoticeText);
 
   final SesionActual _session;
   final AppointmentAlertRepository _bookings;
   final SharedPreferences _storage;
   final AndroidAppointmentAlerts _alerts;
+  final AndroidPushRegistration _push;
+  StreamSubscription<RemoteMessage>? _messages;
   StreamSubscription<void>? _subscription;
   Future<void> _lifecycle = Future.value();
   Future<void>? _sync;
@@ -69,6 +78,18 @@ class AppointmentAlertController extends AppointmentAlerts {
       _tappedUid = uid;
       notifyListeners();
     });
+    try {
+      FirebaseMessaging.onBackgroundMessage(receiveBackgroundAppointmentPush);
+      _messages = FirebaseMessaging.onMessage.listen(
+        (message) => unawaited(
+          receiveAppointmentPush(message, _alerts, () => _session.usuarioId),
+        ),
+        onError: (Object _) =>
+            debugPrint('Could not observe incoming FCM messages.'),
+      );
+    } catch (_) {
+      debugPrint('Could not initialize FCM reception.');
+    }
     try {
       await Workmanager().initialize(appointmentAlertsDispatcher);
     } catch (_) {
@@ -110,6 +131,11 @@ class AppointmentAlertController extends AppointmentAlerts {
           : null;
       if (_disposed || _session.usuarioId != uid) return;
       notifyListeners();
+      if (role == AccountRole.barber) {
+        _push.start(uid);
+      } else {
+        await _push.stop();
+      }
       _listen(uid, role);
       refresh();
       try {
@@ -183,6 +209,7 @@ class AppointmentAlertController extends AppointmentAlerts {
   void refresh() {
     final uid = _uid;
     if (uid == null || _session.usuarioId != uid) return;
+    _push.refresh();
     _dirty = true;
     _sync ??= _drain(uid).whenComplete(() {
       _sync = null;
@@ -216,13 +243,18 @@ class AppointmentAlertController extends AppointmentAlerts {
     try {
       await _alerts.deactivate();
     } finally {
-      await Workmanager().cancelByUniqueName(_alertTask);
+      await Future.wait([
+        _push.stop(),
+        Workmanager().cancelByUniqueName(_alertTask),
+      ]);
     }
   });
 
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_messages?.cancel());
+    _push.dispose();
     _uid = null;
     _dirty = false;
     _retry?.cancel();
