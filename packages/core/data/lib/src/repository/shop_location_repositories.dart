@@ -46,8 +46,7 @@ class FirestoreShopLocationRepository implements ShopLocationRepository {
 class GeolocatorDeviceLocationRepository implements DeviceLocationRepository {
   const GeolocatorDeviceLocationRepository();
 
-  @override
-  Future<MapPoint> current() async {
+  Future<void> _requirePermission() async {
     if (!await Geolocator.isLocationServiceEnabled()) {
       throw StateError('Location is disabled');
     }
@@ -59,12 +58,34 @@ class GeolocatorDeviceLocationRepository implements DeviceLocationRepository {
         permission != LocationPermission.whileInUse) {
       throw StateError('Location permission was denied');
     }
+  }
+
+  @override
+  Future<MapPoint> current() async {
+    await _requirePermission();
     final position = await Geolocator.getCurrentPosition(
       locationSettings: const LocationSettings(
         timeLimit: Duration(seconds: 15),
       ),
     );
     return MapPoint(position.latitude, position.longitude);
+  }
+
+  @override
+  Stream<DeviceLocationFix> positions() async* {
+    await _requirePermission();
+    yield* Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).map(
+      (fix) => DeviceLocationFix(
+        MapPoint(fix.latitude, fix.longitude),
+        fix.accuracy,
+        fix.timestamp,
+      ),
+    );
   }
 }
 

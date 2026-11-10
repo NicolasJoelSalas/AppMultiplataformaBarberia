@@ -20,11 +20,16 @@ class AndroidAppointmentAlerts {
   final _notifications = FlutterLocalNotificationsPlugin();
   Future<Database>? _opening;
   static const _session = 'alert_session';
+  static const _disabled = 'disabled_appointment_reminders';
 
   Future<Database> _database() => _opening ??= openDatabase(
     'appointment_alerts.db',
-    version: 1,
-    onCreate: (db, _) => db.execute('''
+    version: 2,
+    onUpgrade: (db, from, _) async {
+      if (from < 2) await _createReminderPreferences(db);
+    },
+    onCreate: (db, _) async {
+      await db.execute('''
       CREATE TABLE $_session (
         id INTEGER PRIMARY KEY,
         uid TEXT NOT NULL,
@@ -33,8 +38,18 @@ class AndroidAppointmentAlerts {
         baseline TEXT,
         next_id INTEGER NOT NULL DEFAULT 1
       )
-    '''),
+    ''');
+      await _createReminderPreferences(db);
+    },
   );
+
+  Future<void> _createReminderPreferences(Database db) => db.execute('''
+    CREATE TABLE $_disabled (
+      uid TEXT NOT NULL,
+      appointment_id TEXT NOT NULL,
+      PRIMARY KEY (uid, appointment_id)
+    )
+  ''');
 
   AndroidFlutterLocalNotificationsPlugin get _android => _notifications
       .resolvePlatformSpecificImplementation<
@@ -114,6 +129,52 @@ class AndroidAppointmentAlerts {
   Future<Map<String, Object?>?> _active(Transaction tx) async =>
       (await tx.query(_session, limit: 1)).firstOrNull;
 
+  Future<Set<String>> disabledReminders(String uid) async =>
+      _readDisabled(await _database(), uid);
+
+  Future<Set<String>> _readDisabled(DatabaseExecutor db, String uid) async => {
+    for (final row in await db.query(
+      _disabled,
+      where: 'uid = ?',
+      whereArgs: [uid],
+    ))
+      row['appointment_id'] as String,
+  };
+
+  Future<Set<String>> setReminderEnabled(
+    String uid,
+    String appointmentId,
+    bool enabled,
+  ) async => (await _database()).transaction((tx) async {
+    final state = await _active(tx);
+    if (state?['uid'] != uid || state?['role'] != AccountRole.client.name) {
+      throw StateError('No active client session');
+    }
+    if (enabled) {
+      await tx.delete(
+        _disabled,
+        where: 'uid = ? AND appointment_id = ?',
+        whereArgs: [uid, appointmentId],
+      );
+    } else {
+      await tx.insert(_disabled, {
+        'uid': uid,
+        'appointment_id': appointmentId,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      for (final notification
+          in await _notifications.pendingNotificationRequests()) {
+        final payload = _decodePayload(notification.payload);
+        if (payload != null &&
+            payload.length > 2 &&
+            payload[0] == uid &&
+            payload[1] == appointmentId) {
+          await _notifications.cancel(id: notification.id);
+        }
+      }
+    }
+    return _readDisabled(tx, uid);
+  });
+
   Future<void> sync(String uid) async {
     await (await _database()).transaction((tx) async {
       final state = await _active(tx);
@@ -164,11 +225,13 @@ class AndroidAppointmentAlerts {
       final exact = allowed && await _exactAllowed();
       final desired = <String, AppointmentReminder>{};
       if (allowed && role == AccountRole.client) {
+        final disabled = await _readDisabled(tx, uid);
         for (final reminder in upcomingAppointmentReminders(
           current,
           DateTime.now(),
           includeElapsed: true,
         )) {
+          if (disabled.contains(reminder.appointmentId)) continue;
           final payload = jsonEncode([
             uid,
             reminder.appointmentId,

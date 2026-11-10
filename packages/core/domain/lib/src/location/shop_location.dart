@@ -23,8 +23,16 @@ abstract interface class ShopLocationRepository {
   Future<void> save(MapPoint point);
 }
 
+class DeviceLocationFix {
+  const DeviceLocationFix(this.point, this.accuracy, this.timestamp);
+  final MapPoint point;
+  final double accuracy;
+  final DateTime timestamp;
+}
+
 abstract interface class DeviceLocationRepository {
   Future<MapPoint> current();
+  Stream<DeviceLocationFix> positions();
 }
 
 abstract interface class ShopRouteRepository {

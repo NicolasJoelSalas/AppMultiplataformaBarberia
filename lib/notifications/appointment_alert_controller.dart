@@ -55,6 +55,10 @@ class AppointmentAlertController extends AppointmentAlerts {
   bool _dirty = false;
   bool _disposed = false;
   String? _tappedUid;
+  Set<String>? _disabledReminders;
+
+  @override
+  Set<String>? get disabledReminders => _disabledReminders;
 
   static bool get supported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
@@ -101,6 +105,11 @@ class AppointmentAlertController extends AppointmentAlerts {
       _uid = uid;
       _role = role;
       _english = english;
+      _disabledReminders = role == AccountRole.client
+          ? Set.unmodifiable(await _alerts.disabledReminders(uid))
+          : null;
+      if (_disposed || _session.usuarioId != uid) return;
+      notifyListeners();
       _listen(uid, role);
       refresh();
       try {
@@ -137,6 +146,25 @@ class AppointmentAlertController extends AppointmentAlerts {
             });
           },
         );
+  }
+
+  @override
+  Future<void> setReminderEnabled(String appointmentId, bool enabled) async {
+    final uid = _uid;
+    if (uid == null ||
+        _disabledReminders == null ||
+        _session.usuarioId != uid) {
+      throw StateError('No active client session');
+    }
+    final updated = await _alerts.setReminderEnabled(
+      uid,
+      appointmentId,
+      enabled,
+    );
+    if (_disposed || _uid != uid || _session.usuarioId != uid) return;
+    _disabledReminders = Set.unmodifiable(updated);
+    notifyListeners();
+    if (enabled) refresh();
   }
 
   @override
@@ -177,9 +205,11 @@ class AppointmentAlertController extends AppointmentAlerts {
   Future<void> stop() => _enqueue(() async {
     _uid = null;
     _role = null;
+    _disabledReminders = null;
     _english = null;
     _dirty = false;
     _tappedUid = null;
+    if (!_disposed) notifyListeners();
     _retry?.cancel();
     await _subscription?.cancel();
     _subscription = null;

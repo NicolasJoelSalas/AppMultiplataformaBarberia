@@ -16,6 +16,7 @@ class LoginViewModel extends ChangeNotifier {
     this.googlePopup,
     String? initialUserId,
     this._sessionChanges,
+    this._clearAccountCache,
   }) : _userId = initialUserId,
        _state = LoginUiState(isLoading: initiallyLoggedIn);
   final LoginUseCase login;
@@ -27,6 +28,8 @@ class LoginViewModel extends ChangeNotifier {
   LoginUiState _state;
   LoginUiState get state => _state;
   final Stream<String?>? _sessionChanges;
+  final Future<void> Function(String uid)? _clearAccountCache;
+  Future<void> _cacheCleanup = Future.value();
   StreamSubscription<String?>? _sessionSubscription;
   String? _userId;
   int _sessionRevision = 0;
@@ -48,10 +51,36 @@ class LoginViewModel extends ChangeNotifier {
 
   void _onSessionChanged(String? userId) {
     if (_disposed || userId == _userId) return;
+    final previous = _userId;
     _userId = userId;
-    _sessionRevision++;
-    _emit(LoginUiState(isLoading: userId != null));
-    if (userId != null) unawaited(_completeSession());
+    final revision = ++_sessionRevision;
+    _emit(const LoginUiState(isLoading: true));
+    unawaited(_switchAccount(previous, userId, revision));
+  }
+
+  Future<void> _switchAccount(
+    String? previous,
+    String? userId,
+    int revision,
+  ) async {
+    final cleanup = _cacheCleanup.then((_) async {
+      if (previous != null) await _clearAccountCache?.call(previous);
+    });
+    _cacheCleanup = cleanup.catchError((Object _) {});
+    try {
+      await cleanup;
+    } catch (_) {
+      if (_isCurrent(revision)) {
+        _emit(const LoginUiState(error: AuthError.unknown));
+      }
+      return;
+    }
+    if (!_isCurrent(revision)) return;
+    if (userId == null) {
+      _emit(const LoginUiState());
+    } else {
+      await _completeSession();
+    }
   }
 
   void onToggleRegistration() {

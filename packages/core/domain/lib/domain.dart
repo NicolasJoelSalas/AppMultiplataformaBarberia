@@ -16,4 +16,5 @@ export 'src/appointments/booking.dart';
 export 'src/services/barber_service.dart';
 export 'src/work/work_post.dart';
 export 'src/location/shop_location.dart';
+export 'src/location/route_progress.dart';
 export 'src/appointments/appointment_alerts.dart';

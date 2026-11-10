@@ -7,6 +7,7 @@ import 'package:domain/domain.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'account_cache_writes.dart';
 import 'appointment_storage.dart';
 import 'cloudinary_reference.dart';
 
@@ -28,6 +29,7 @@ class FirestoreBookingRepository
   final FirebaseAuth _auth;
   final DateTime Function() _now;
   final SharedPreferences? _storage;
+  final _cacheWrites = AccountCacheWrites();
 
   CollectionReference<_Fields> get _barbers =>
       _firestore.collection('barberos');
@@ -361,10 +363,22 @@ class FirestoreBookingRepository
     return _dayRef(barberId, calendar.startOfDay(calendar.dateOf(slot.start)));
   }
 
+  String _cacheKey(String uid, AccountRole role) =>
+      'appointments.${role.name}.$uid';
+
+  Future<void> clearLocal(String uid) async {
+    await _cacheWrites.invalidate(uid);
+    await Future.wait([
+      for (final role in AccountRole.values)
+        if (_storage case final storage?) storage.remove(_cacheKey(uid, role)),
+    ]);
+  }
+
   @override
   Stream<List<Appointment>> watchAppointments(AccountRole role) async* {
     final uid = _uid();
-    final key = 'appointments.${role.name}.$uid';
+    final key = _cacheKey(uid, role);
+    final generation = _cacheWrites.generation(uid);
     final cached = _readAppointments(key);
     if (cached != null) yield cached;
     yield* _appointmentQuery(role, uid)
@@ -416,14 +430,24 @@ class FirestoreBookingRepository
               status: decodeAppointmentStatus(record['Estado']),
             );
           }).toList();
-          await _storeAppointments(key, items);
+          await _cacheWrites.write(
+            uid,
+            generation,
+            () => _storeAppointments(key, items),
+          );
           _requireUser(uid);
           return items;
         })
         .handleError((Object error) {
           final failure = _failure(error);
           if (failure == BookingFailure.permission) {
-            unawaited(_removeCachedAppointments(key));
+            unawaited(
+              _cacheWrites.write(
+                uid,
+                generation,
+                () => _removeCachedAppointments(key),
+              ),
+            );
           }
           throw failure;
         });

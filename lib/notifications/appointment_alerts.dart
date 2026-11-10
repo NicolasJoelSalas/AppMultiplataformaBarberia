@@ -7,6 +7,8 @@ abstract class AppointmentAlerts extends ChangeNotifier {
   Future<void> stop();
 
   bool get supportsSystemPermissions => false;
+  Set<String>? get disabledReminders => null;
+  Future<void> setReminderEnabled(String appointmentId, bool enabled) async {}
   bool takeTap() => false;
   List<AppointmentNotice> takeNotices() => const [];
   Future<bool> requestPermissions({required bool exact}) async => false;

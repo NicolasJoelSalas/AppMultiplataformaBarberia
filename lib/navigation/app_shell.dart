@@ -282,7 +282,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: _account,
+    listenable: Listenable.merge([_account, widget.alerts]),
     builder: (context, _) {
       if (_closingSession ||
           widget.loggingOut ||
@@ -359,6 +359,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         ? AppointmentsScreen(
                             model: _appointments!,
                             onDirections: barber ? null : _openLocation,
+                            disabledReminders: widget.alerts?.disabledReminders,
+                            onReminderChanged:
+                                widget.alerts?.setReminderEnabled,
                             onEnableAlerts:
                                 widget.alerts?.supportsSystemPermissions != true
                                 ? null

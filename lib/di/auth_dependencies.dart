@@ -46,6 +46,18 @@ class AuthDependencies {
       FirebaseAuth.instance,
       preferences,
     );
+    final booking = FirestoreBookingRepository(
+      FirebaseFirestore.instance,
+      FirebaseAuth.instance,
+      storage: preferences,
+    );
+    final photos = await _createBookingPhotos();
+    final work = FirestoreWorkRepository(
+      FirebaseFirestore.instance,
+      FirebaseAuth.instance,
+      photos,
+      preferences,
+    );
     final login = LoginViewModel(
       login: LoginUseCase(auth),
       register: RegisterUseCase(auth),
@@ -56,6 +68,13 @@ class AuthDependencies {
       initiallyLoggedIn: auth.isLoggedIn,
       initialUserId: auth.usuarioId,
       sessionChanges: auth.sessionChanges,
+      clearAccountCache: (uid) async {
+        await Future.wait([
+          booking.clearLocal(uid),
+          work.clearLocal(uid),
+          clientes.clearValidatedSession(uid),
+        ]);
+      },
     );
     final services = FirestoreBarberServiceRepository(
       FirebaseFirestore.instance,
@@ -65,12 +84,6 @@ class AuthDependencies {
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
     );
-    final booking = FirestoreBookingRepository(
-      FirebaseFirestore.instance,
-      FirebaseAuth.instance,
-      storage: preferences,
-    );
-    final photos = await _createBookingPhotos();
     final alerts = await _createAlerts(auth, booking, preferences);
     return AuthDependencies._(
       login,
@@ -79,12 +92,7 @@ class AuthDependencies {
       agenda,
       booking,
       photos,
-      FirestoreWorkRepository(
-        FirebaseFirestore.instance,
-        FirebaseAuth.instance,
-        photos,
-        preferences,
-      ),
+      work,
       FirestoreShopLocationRepository(
         FirebaseFirestore.instance,
         FirebaseAuth.instance,
@@ -107,7 +115,7 @@ class AuthDependencies {
     AppointmentAlertRepository booking,
     SharedPreferences preferences,
   ) async {
-    if (kIsWeb) return WebAppointmentAlerts(session, booking);
+    if (kIsWeb) return WebAppointmentAlerts(session, booking, preferences);
     if (!AppointmentAlertController.supported) return null;
     final controller = AppointmentAlertController(
       session,

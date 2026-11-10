@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:network/network.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'account_cache_writes.dart';
 import 'cloudinary_booking_photo_repository.dart';
 import 'work_image_cache.dart';
 
@@ -24,6 +25,7 @@ class FirestoreWorkRepository implements WorkRepository {
   final CloudinaryBookingPhotoRepository _photos;
   final SharedPreferences _storage;
   final _images = const WorkImageCache();
+  final _cacheWrites = AccountCacheWrites();
   final _uploads = <String, Future<CloudinaryPhoto>>{};
   final _downloads = <String, Future<Uint8List?>>{};
   final _prefetching = <String, Future<void>>{};
@@ -34,10 +36,26 @@ class FirestoreWorkRepository implements WorkRepository {
   String get _uid => _auth.currentUser?.uid ?? (throw StateError('Sign in'));
   String _cacheKey(String uid) => 'work.feed.$uid';
 
+  Future<void> clearLocal(String uid) async {
+    final invalidate = _cacheWrites.invalidate(uid);
+    _prefetching.remove(uid);
+    _uploads.removeWhere((key, _) => key.startsWith('$uid/'));
+    await invalidate;
+    await Future.wait([
+      _storage.remove(_cacheKey(uid)),
+      _images.clear(_fileComponent(uid)),
+    ]);
+  }
+
+  bool _isCurrent(String uid, int generation) =>
+      _auth.currentUser?.uid == uid &&
+      _cacheWrites.generation(uid) == generation;
+
   @override
   Stream<WorkFeed> watch() async* {
     final uid = _uid;
     final key = _cacheKey(uid);
+    final generation = _cacheWrites.generation(uid);
     List<WorkPost>? saved;
     final cached = _storage.getString(key);
     if (cached != null) {
@@ -47,19 +65,23 @@ class FirestoreWorkRepository implements WorkRepository {
             _decode(row['id'] as String, row as Map<String, dynamic>, uid),
         ];
       } on Exception {
-        await _storage.remove(key);
+        await _cacheWrites.write(uid, generation, () async {
+          await _storage.remove(key);
+        });
       } on TypeError {
-        await _storage.remove(key);
+        await _cacheWrites.write(uid, generation, () async {
+          await _storage.remove(key);
+        });
       }
     }
-    if (_uid != uid) return;
+    if (!_isCurrent(uid, generation)) return;
     if (saved != null) yield WorkFeed(saved, offline: true);
     await for (final snapshot
         in _posts
             .orderBy('CreadoEn', descending: true)
             .limit(50)
             .snapshots(includeMetadataChanges: true)) {
-      if (_uid != uid) return;
+      if (!_isCurrent(uid, generation)) return;
       if (snapshot.metadata.hasPendingWrites) continue;
       if (snapshot.metadata.isFromCache) {
         yield WorkFeed(saved ?? const [], offline: true);
@@ -82,13 +104,15 @@ class FirestoreWorkRepository implements WorkRepository {
       final encoded = jsonEncode(rows);
       if (_storage.getString(key) != encoded) {
         try {
-          await _storage.setString(key, encoded);
+          await _cacheWrites.write(uid, generation, () async {
+            await _storage.setString(key, encoded);
+          });
         } on Exception {
           // Remote results remain usable if local storage is unavailable.
         }
       }
-      if (_uid != uid) return;
-      _queuePrefetch(uid, saved);
+      if (!_isCurrent(uid, generation)) return;
+      _queuePrefetch(uid, generation, saved);
       yield WorkFeed(saved, offline: false);
     }
   }
@@ -106,27 +130,33 @@ class FirestoreWorkRepository implements WorkRepository {
     );
   }
 
-  void _queuePrefetch(String uid, List<WorkPost> posts) {
+  void _queuePrefetch(String uid, int generation, List<WorkPost> posts) {
     final previous = _prefetching[uid] ?? Future.value();
     late final Future<void> next;
     next = previous
         .then((_) async {
-          if (_prefetching[uid] != next || _auth.currentUser?.uid != uid) {
+          if (_prefetching[uid] != next || !_isCurrent(uid, generation)) {
             return;
           }
           try {
-            await _images.retain(_fileComponent(uid), {
-              for (final post in posts) _imageName(post),
-            });
+            await _cacheWrites.write(
+              uid,
+              generation,
+              () => _images.retain(_fileComponent(uid), {
+                for (final post in posts) _imageName(post),
+              }),
+            );
             for (var i = 0; i < posts.length; i += 3) {
-              if (_prefetching[uid] != next || _auth.currentUser?.uid != uid) {
+              if (_prefetching[uid] != next || !_isCurrent(uid, generation)) {
                 return;
               }
               await Future.wait(
                 posts
                     .skip(i)
                     .take(3)
-                    .map((post) => _image(uid, post, offline: false)),
+                    .map(
+                      (post) => _image(uid, generation, post, offline: false),
+                    ),
               );
             }
           } catch (_) {
@@ -146,12 +176,14 @@ class FirestoreWorkRepository implements WorkRepository {
   @override
   Future<Uint8List?> readImage(WorkPost post, {required bool offline}) async {
     final uid = _uid;
-    final bytes = await _image(uid, post, offline: offline);
-    return _auth.currentUser?.uid == uid ? bytes : null;
+    final generation = _cacheWrites.generation(uid);
+    final bytes = await _image(uid, generation, post, offline: offline);
+    return _isCurrent(uid, generation) ? bytes : null;
   }
 
   Future<Uint8List?> _image(
     String uid,
+    int generation,
     WorkPost post, {
     required bool offline,
   }) async {
@@ -163,15 +195,19 @@ class FirestoreWorkRepository implements WorkRepository {
     } catch (_) {
       // Online photos remain available if the device blocks persistent storage.
     }
-    if (offline || _auth.currentUser?.uid != uid) return null;
+    if (offline || !_isCurrent(uid, generation)) return null;
 
-    final key = '$account/$name';
+    final key = '$account/$generation/$name';
     return _downloads.putIfAbsent(key, () async {
       try {
         final bytes = await _download(post.imageUrl);
-        if (bytes != null && _auth.currentUser?.uid == uid) {
+        if (bytes != null && _isCurrent(uid, generation)) {
           try {
-            await _images.write(account, name, bytes);
+            await _cacheWrites.write(
+              uid,
+              generation,
+              () => _images.write(account, name, bytes),
+            );
           } catch (_) {
             // Keep displaying the downloaded photo even if it cannot be saved.
           }

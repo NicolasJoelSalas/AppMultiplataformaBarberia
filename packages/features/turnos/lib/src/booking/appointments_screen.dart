@@ -13,6 +13,8 @@ class AppointmentsScreen extends StatefulWidget {
     this.onEdit,
     this.onDirections,
     this.onEnableAlerts,
+    this.disabledReminders,
+    this.onReminderChanged,
   });
 
   final AppointmentsViewModel model;
@@ -20,6 +22,9 @@ class AppointmentsScreen extends StatefulWidget {
   final Future<int?> Function(Appointment)? onEdit;
   final ValueChanged<String>? onDirections;
   final VoidCallback? onEnableAlerts;
+  final Set<String>? disabledReminders;
+  final Future<void> Function(String appointmentId, bool enabled)?
+  onReminderChanged;
 
   @override
   State<AppointmentsScreen> createState() => _AppointmentsScreenState();
@@ -28,6 +33,7 @@ class AppointmentsScreen extends StatefulWidget {
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
   int _offset = 0;
   AppointmentStatus? _statusFilter;
+  bool _savingReminder = false;
   bool get _busy =>
       widget.model.savingId != null ||
       widget.model.error == BookingFailure.network ||
@@ -69,6 +75,20 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     );
     if (!mounted || confirmed != true || _busy) return;
     await _perform(() => widget.model.cancel(item), strings.canceled);
+  }
+
+  Future<void> _toggleReminder(Appointment item, bool enabled) async {
+    if (_savingReminder) return;
+    setState(() => _savingReminder = true);
+    try {
+      await widget.onReminderChanged!(item.id, enabled);
+    } catch (_) {
+      if (mounted) {
+        _message(BookingStrings(context).error(BookingFailure.operation));
+      }
+    } finally {
+      if (mounted) setState(() => _savingReminder = false);
+    }
   }
 
   Future<void> _perform(Future<void> Function() action, String success) async {
@@ -226,6 +246,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final start = item.start!;
     final end = item.end;
     final calendar = widget.model.calendarFor(item);
+    final reminderDisabled =
+        widget.disabledReminders?.contains(item.id) ?? false;
+    final english = Localizations.localeOf(context).languageCode == 'en';
     final colors = Theme.of(context).colorScheme;
     return Card(
       key: ValueKey(item.id),
@@ -283,6 +306,28 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                     OutlinedButton(
                       onPressed: _busy ? null : () => _reserve(item),
                       child: Text(strings.edit),
+                    ),
+                  if (!barber &&
+                      widget.disabledReminders != null &&
+                      widget.onReminderChanged != null)
+                    OutlinedButton.icon(
+                      onPressed: _savingReminder
+                          ? null
+                          : () => _toggleReminder(item, reminderDisabled),
+                      icon: Icon(
+                        reminderDisabled
+                            ? Icons.notifications_active_outlined
+                            : Icons.notifications_off_outlined,
+                      ),
+                      label: Text(
+                        reminderDisabled
+                            ? (english
+                                  ? 'Enable reminders'
+                                  : 'Activar recordatorios')
+                            : (english
+                                  ? 'Disable reminders'
+                                  : 'Desactivar recordatorios'),
+                      ),
                     ),
                   TextButton(
                     onPressed: _busy ? null : () => _cancel(item),
