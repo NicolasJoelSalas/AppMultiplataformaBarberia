@@ -11,11 +11,15 @@ class AppointmentsScreen extends StatefulWidget {
     required this.model,
     this.onReserve,
     this.onEdit,
+    this.onDirections,
+    this.onEnableAlerts,
   });
 
   final AppointmentsViewModel model;
   final Future<int?> Function()? onReserve;
   final Future<int?> Function(Appointment)? onEdit;
+  final ValueChanged<String>? onDirections;
+  final VoidCallback? onEnableAlerts;
 
   @override
   State<AppointmentsScreen> createState() => _AppointmentsScreenState();
@@ -24,7 +28,10 @@ class AppointmentsScreen extends StatefulWidget {
 class _AppointmentsScreenState extends State<AppointmentsScreen> {
   int _offset = 0;
   AppointmentStatus? _statusFilter;
-  bool get _busy => widget.model.savingId != null;
+  bool get _busy =>
+      widget.model.savingId != null ||
+      widget.model.error == BookingFailure.network ||
+      widget.model.error == BookingFailure.permission;
 
   Future<void> _reserve([Appointment? original]) async {
     final offset = await (original == null
@@ -92,30 +99,25 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final now = DateTime.now();
     final appointments = widget.model.appointments;
     final error = widget.model.error;
-    final weekly =
-        [
-          for (final item in appointments ?? const <Appointment>[])
-            if (_inWeek(item, now)) item,
-        ]..sort((a, b) {
-          final byDistance = a.start!
-              .difference(now)
-              .inMicroseconds
-              .abs()
-              .compareTo(b.start!.difference(now).inMicroseconds.abs());
-          if (byDistance != 0) return byDistance;
-          final byTime = a.start!.compareTo(b.start!);
-          return byTime == 0 ? a.id.compareTo(b.id) : byTime;
-        });
-    final groups = <AppointmentStatus, List<Appointment>>{};
-    for (final item in weekly) {
-      if (_statusFilter == null || item.status == _statusFilter) {
-        groups.putIfAbsent(item.status, () => []).add(item);
-      }
-    }
+    final (weekly, groups) = widget.model.groupedWeek(
+      now,
+      _offset,
+      _statusFilter,
+    );
     return Scaffold(
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: Text(barber ? strings.appointments : strings.myAppointments),
+        actions: [
+          if (widget.onEnableAlerts case final enable?)
+            IconButton(
+              onPressed: enable,
+              tooltip: Localizations.localeOf(context).languageCode == 'en'
+                  ? 'Enable appointment alerts'
+                  : 'Activar avisos de turnos',
+              icon: const Icon(Icons.notifications_outlined),
+            ),
+        ],
         backgroundColor: colors.primaryContainer,
         foregroundColor: colors.onPrimaryContainer,
       ),
@@ -215,25 +217,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     );
   }
 
-  AgendaCalendar _calendar(Appointment item) {
-    const fallback = 'America/Argentina/Buenos_Aires';
-    try {
-      return AgendaCalendar(item.zoneId ?? fallback);
-    } on AgendaProblem {
-      return AgendaCalendar(fallback);
-    }
-  }
-
-  bool _inWeek(Appointment item, DateTime now) {
-    final start = item.start;
-    if (start == null) return false;
-    final calendar = _calendar(item);
-    final monday = calendar.mondayFor(now, _offset);
-    final date = calendar.dateOf(start);
-    return !date.isBefore(monday) &&
-        date.isBefore(monday.add(const Duration(days: 7)));
-  }
-
   Widget _card(
     Appointment item,
     BookingStrings strings,
@@ -242,7 +225,7 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
   ) {
     final start = item.start!;
     final end = item.end;
-    final calendar = _calendar(item);
+    final calendar = widget.model.calendarFor(item);
     final colors = Theme.of(context).colorScheme;
     return Card(
       key: ValueKey(item.id),
@@ -263,6 +246,20 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
               '${barber ? strings.client : strings.barber} · ${item.participantName.isEmpty ? strings.unknownName : item.participantName}',
             ),
             Text(strings.date(calendar.dateOf(start))),
+            if (!barber &&
+                item.barberId.isNotEmpty &&
+                item.canChangeAt(now) &&
+                widget.onDirections != null &&
+                widget.model.error != BookingFailure.network)
+              TextButton.icon(
+                onPressed: () => widget.onDirections!(item.barberId),
+                icon: const Icon(Icons.directions_outlined),
+                label: Text(
+                  Localizations.localeOf(context).languageCode == 'en'
+                      ? 'Directions'
+                      : 'Cómo llegar',
+                ),
+              ),
             if (end != null) Text(strings.interval(calendar, start, end)),
             Text(
               strings.status(item.status),
@@ -274,9 +271,9 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
             ),
             if (item.chargedPriceCents case final cents? when barber)
               Text(strings.charged(cents)),
-            if (item.referenceUrl case final url?) ...[
+            if (item.referenceUrl != null) ...[
               Text(strings.photo),
-              ReferencePhoto(url: url),
+              ReferencePhoto(url: item.visibleReferenceUrl),
             ],
             if (item.canChangeAt(now))
               Wrap(

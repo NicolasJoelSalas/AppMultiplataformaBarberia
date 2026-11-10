@@ -1,3 +1,4 @@
+resolution: workspace
 publish_to: none
 name: core_data
 description: "A new Flutter package project."
@@ -9,21 +10,25 @@ environment:
   flutter: ">=1.17.0"
 
 dependencies:
+  path_provider: ^2.1.6
+  web: ^1.1.1
+  geolocator: ^14.1.2
+  flutter_local_notifications: ^21.0.0
+  timezone: ^0.11.2
+  sqflite: ^2.4.6
   domain:
     path: ../domain
   shared_preferences: ^2.5.3
   cloud_firestore: ^7.1.0
   collection: ^1.19.1
   firebase_auth: ^7.0.1
-  http: ^1.6.0
-  http_parser: ^4.1.2
+  network:
+    path: ../network
   image: ^4.3.0
   flutter:
     sdk: flutter
 
 dev_dependencies:
-  flutter_test:
-    sdk: flutter
   flutter_lints: ^6.0.0
 
 # For information on the generic Dart part of this file, see the

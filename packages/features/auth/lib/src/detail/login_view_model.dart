@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:domain/domain.dart';
 import 'package:flutter/foundation.dart';
 
@@ -11,15 +13,27 @@ class LoginViewModel extends ChangeNotifier {
     required this.ensureProfile,
     required this.logout,
     required bool initiallyLoggedIn,
-  }) : _state = LoginUiState(isLoading: initiallyLoggedIn);
+    this.googlePopup,
+    String? initialUserId,
+    this._sessionChanges,
+  }) : _userId = initialUserId,
+       _state = LoginUiState(isLoading: initiallyLoggedIn);
   final LoginUseCase login;
   final RegisterUseCase register;
   final LoginWithGoogleUseCase loginWithGoogle;
+  final Future<AppResult<void>?> Function()? googlePopup;
   final EnsureClienteProfileUseCase ensureProfile;
   final LogoutUseCase logout;
   LoginUiState _state;
   LoginUiState get state => _state;
+  final Stream<String?>? _sessionChanges;
+  StreamSubscription<String?>? _sessionSubscription;
+  String? _userId;
+  int _sessionRevision = 0;
+  int get sessionRevision => _sessionRevision;
   bool _disposed = false;
+
+  bool _isCurrent(int revision) => !_disposed && revision == _sessionRevision;
   void _emit(LoginUiState next) {
     if (_disposed) return;
     _state = next;
@@ -27,7 +41,17 @@ class LoginViewModel extends ChangeNotifier {
   }
 
   Future<void> initialize() async {
+    if (_disposed) return;
+    _sessionSubscription ??= _sessionChanges?.listen(_onSessionChanged);
     if (_state.isLoading) await _completeSession();
+  }
+
+  void _onSessionChanged(String? userId) {
+    if (_disposed || userId == _userId) return;
+    _userId = userId;
+    _sessionRevision++;
+    _emit(LoginUiState(isLoading: userId != null));
+    if (userId != null) unawaited(_completeSession());
   }
 
   void onToggleRegistration() {
@@ -43,37 +67,55 @@ class LoginViewModel extends ChangeNotifier {
       _authenticate(() => register(email, password, confirmation));
   Future<void> _authenticate(Future<AppResult<void>> Function() action) async {
     if (_state.isLoading || _state.isAuthenticated || _disposed) return;
+    final revision = _sessionRevision;
     _emit(_state.copyWith(isLoading: true, clearError: true));
     try {
       final result = await action();
+      if (!_isCurrent(revision)) return;
       if (result is Failure<void>) {
         _emit(_state.copyWith(isLoading: false, error: result.error));
-      } else {
+      } else if (_sessionChanges == null) {
         await _completeSession();
       }
     } catch (_) {
+      if (!_isCurrent(revision)) return;
       _emit(_state.copyWith(isLoading: false, error: AuthError.unknown));
     }
   }
 
   Future<void> onGoogleLogin(Future<String?> Function() getToken) async {
     if (_state.isLoading || _state.isAuthenticated || _disposed) return;
+    final revision = _sessionRevision;
     _emit(_state.copyWith(isLoading: true, clearError: true));
     try {
-      final token = await getToken();
-      if (token == null) {
+      final popup = googlePopup;
+      final result = await (popup == null
+          ? _googleWithToken(getToken, revision)
+          : popup());
+      if (!_isCurrent(revision)) return;
+      if (result == null) {
         _emit(_state.copyWith(isLoading: false));
         return;
       }
-      final result = await loginWithGoogle(token);
       if (result is Failure<void>) {
         _emit(_state.copyWith(isLoading: false, error: result.error));
-      } else {
+      } else if (_sessionChanges == null) {
         await _completeSession();
       }
     } catch (_) {
+      if (!_isCurrent(revision)) return;
       _emit(_state.copyWith(isLoading: false, error: AuthError.googleOpen));
     }
+  }
+
+  Future<AppResult<void>?> _googleWithToken(
+    Future<String?> Function() getToken,
+    int revision,
+  ) async {
+    final token = await getToken();
+    return token == null || !_isCurrent(revision)
+        ? null
+        : loginWithGoogle(token);
   }
 
   Future<void> onRetryProfile() async {
@@ -83,8 +125,10 @@ class LoginViewModel extends ChangeNotifier {
   }
 
   Future<void> _completeSession() async {
+    final revision = _sessionRevision;
     try {
       final result = await ensureProfile();
+      if (!_isCurrent(revision)) return;
       if (result is Failure<void>) {
         _emit(
           _state.copyWith(
@@ -105,6 +149,7 @@ class LoginViewModel extends ChangeNotifier {
         );
       }
     } catch (_) {
+      if (!_isCurrent(revision)) return;
       _emit(
         _state.copyWith(
           isLoading: false,
@@ -118,15 +163,18 @@ class LoginViewModel extends ChangeNotifier {
 
   Future<void> onLogout() async {
     if (_state.isLoading || !_state.isAuthenticated || _disposed) return;
+    final revision = _sessionRevision;
     _emit(_state.copyWith(isLoading: true, clearError: true));
     try {
       final result = await logout();
+      if (!_isCurrent(revision)) return;
       if (result is Failure<void>) {
         _emit(_state.copyWith(isLoading: false, error: result.error));
       } else {
         _emit(const LoginUiState());
       }
     } catch (_) {
+      if (!_isCurrent(revision)) return;
       _emit(_state.copyWith(isLoading: false, error: AuthError.unknown));
     }
   }
@@ -134,6 +182,7 @@ class LoginViewModel extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    unawaited(_sessionSubscription?.cancel());
     super.dispose();
   }
 }

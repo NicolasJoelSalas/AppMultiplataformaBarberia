@@ -21,6 +21,17 @@ version: 1.0.0+1
 environment:
   sdk: ^3.13.7
 
+workspace:
+  - packages/core/auth
+  - packages/core/data
+  - packages/core/domain
+  - packages/core/network
+  - packages/core/ui
+  - packages/features/auth
+  - packages/features/cuenta
+  - packages/features/trabajos
+  - packages/features/turnos
+
 # Dependencies specify other packages that your package needs in order to work.
 # To automatically upgrade your package dependencies to the latest versions
 # consider running `flutter pub upgrade --major-versions`. Alternatively,
@@ -28,6 +39,8 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
+  feature_trabajos:
+    path: packages/features/trabajos
   flutter_localizations:
     sdk: flutter
   domain:
@@ -46,6 +59,7 @@ dependencies:
     path: packages/features/turnos
   cloud_firestore: ^7.1.0
   shared_preferences: ^2.5.3
+  workmanager: ^0.10.10
   flutter:
     sdk: flutter
 
@@ -56,8 +70,6 @@ dependencies:
   firebase_auth: ^7.0.1
 
 dev_dependencies:
-  flutter_test:
-    sdk: flutter
 
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is

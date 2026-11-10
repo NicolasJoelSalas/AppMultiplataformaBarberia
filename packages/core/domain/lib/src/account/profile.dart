@@ -28,6 +28,11 @@ class LoadProfileUseCase {
   Future<AppResult<AccountProfile>> call() => repository.loadProfile();
 }
 
+String initialProfileName(String name) =>
+    name.length > UpdateProfileNameUseCase.maxLength
+    ? name.substring(0, UpdateProfileNameUseCase.maxLength)
+    : name;
+
 class UpdateProfileNameUseCase {
   const UpdateProfileNameUseCase(this.repository);
   final ProfileRepository repository;

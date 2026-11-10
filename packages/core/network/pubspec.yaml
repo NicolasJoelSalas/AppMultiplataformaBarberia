@@ -1,5 +1,6 @@
+resolution: workspace
 name: network
-description: A starting point for Dart libraries or applications.
+description: Transporte HTTP compartido para los adaptadores de datos.
 version: 1.0.0
 # repository: https://github.com/my_org/my_repo
 
@@ -8,8 +9,8 @@ environment:
 
 # Add regular dependencies here.
 dependencies:
-  # path: ^1.9.0
+  http: ^1.6.0
+  http_parser: ^4.1.2
 
 dev_dependencies:
   lints: ^6.0.0
-  test: ^1.25.6

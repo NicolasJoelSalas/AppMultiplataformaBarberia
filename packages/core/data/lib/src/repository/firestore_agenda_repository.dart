@@ -3,6 +3,8 @@ import 'package:collection/collection.dart';
 import 'package:domain/domain.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+import 'appointment_storage.dart';
+
 typedef _Fields = Map<String, dynamic>;
 typedef _Ref = DocumentReference<_Fields>;
 typedef _Doc = DocumentSnapshot<_Fields>;
@@ -119,9 +121,13 @@ class FirestoreAgendaRepository implements AgendaRepository {
     // an appointment between the first query and the preparation transaction.
     for (final booking in await _bookings(uid, days)) {
       final day = days.firstWhere((day) => day.containsStart(booking.start));
-      if (booking.pending &&
-          booking.start.isAfter(_now()) &&
-          !day.includes(booking.start, booking.end)) {
+      if (shouldCancelAfterAgendaChange(
+        day,
+        booking.status,
+        booking.start,
+        booking.end,
+        _now(),
+      )) {
         await _cancelExcluded(uid, week, agenda, day, booking.ref);
       }
     }
@@ -162,10 +168,13 @@ class FirestoreAgendaRepository implements AgendaRepository {
       return;
     }
     final booking = _AgendaBooking.read(currentBooking);
-    if (!booking.pending ||
-        !booking.start.isAfter(_now()) ||
-        !day.containsStart(booking.start) ||
-        day.includes(booking.start, booking.end)) {
+    if (!shouldCancelAfterAgendaChange(
+      day,
+      booking.status,
+      booking.start,
+      booking.end,
+      _now(),
+    )) {
       return;
     }
     _requireDay(booking, currentDay.id);
@@ -203,7 +212,7 @@ class FirestoreAgendaRepository implements AgendaRepository {
       final start = data['Inicio'];
       if (start is! Timestamp ||
           !days.any((day) => day.containsStart(start.toDate())) ||
-          AppointmentStatus.fromStored(data['Estado']) ==
+          decodeAppointmentStatus(data['Estado']) ==
               AppointmentStatus.canceled) {
         continue;
       }
@@ -339,15 +348,13 @@ class _AgendaBooking {
       start = _date(doc, 'Inicio'),
       end = _date(doc, 'Fin'),
       dayId = doc.data()?['DiaId'],
-      pending =
-          AppointmentStatus.fromStored(doc.data()?['Estado']) ==
-          AppointmentStatus.pending;
+      status = decodeAppointmentStatus(doc.data()?['Estado']);
 
   final _Ref ref;
   final DateTime start;
   final DateTime end;
   final Object? dayId;
-  final bool pending;
+  final AppointmentStatus status;
 
   static DateTime _date(_Doc doc, String key) {
     final value = doc.data()?[key];

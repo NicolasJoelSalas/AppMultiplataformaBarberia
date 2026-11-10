@@ -26,6 +26,53 @@ class AppointmentsViewModel extends ChangeNotifier {
           .length ??
       0;
 
+  (List<Appointment>, Map<AppointmentStatus, List<Appointment>>) groupedWeek(
+    DateTime now,
+    int offset,
+    AppointmentStatus? statusFilter,
+  ) {
+    final weekly =
+        [
+          for (final item in _appointments ?? const <Appointment>[])
+            if (_inWeek(item, now, offset)) item,
+        ]..sort((a, b) {
+          final byDistance = a.start!
+              .difference(now)
+              .inMicroseconds
+              .abs()
+              .compareTo(b.start!.difference(now).inMicroseconds.abs());
+          if (byDistance != 0) return byDistance;
+          final byTime = a.start!.compareTo(b.start!);
+          return byTime == 0 ? a.id.compareTo(b.id) : byTime;
+        });
+    final groups = <AppointmentStatus, List<Appointment>>{};
+    for (final item in weekly) {
+      if (statusFilter == null || item.status == statusFilter) {
+        groups.putIfAbsent(item.status, () => []).add(item);
+      }
+    }
+    return (weekly, groups);
+  }
+
+  AgendaCalendar calendarFor(Appointment item) {
+    const fallback = 'America/Argentina/Buenos_Aires';
+    try {
+      return AgendaCalendar(item.zoneId ?? fallback);
+    } on AgendaProblem {
+      return AgendaCalendar(fallback);
+    }
+  }
+
+  bool _inWeek(Appointment item, DateTime now, int offset) {
+    final start = item.start;
+    if (start == null) return false;
+    final calendar = calendarFor(item);
+    final monday = calendar.mondayFor(now, offset);
+    final date = calendar.dateOf(start);
+    return !date.isBefore(monday) &&
+        date.isBefore(monday.add(const Duration(days: 7)));
+  }
+
   void start() {
     if (_subscription == null) retry();
   }
@@ -45,6 +92,10 @@ class AppointmentsViewModel extends ChangeNotifier {
           },
           onError: (Object error) {
             _error = error is BookingFailure ? error : BookingFailure.operation;
+            if (_error == BookingFailure.permission) {
+              _appointments = null;
+              _startTimer?.cancel();
+            }
             notifyListeners();
           },
         );

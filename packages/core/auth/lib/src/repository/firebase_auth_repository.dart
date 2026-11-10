@@ -8,6 +8,9 @@ class FirebaseAuthRepository implements AuthRepository, SesionActual {
   bool get isLoggedIn => auth.currentUser != null;
   @override
   String? get usuarioId => auth.currentUser?.uid;
+
+  Stream<String?> get sessionChanges =>
+      auth.authStateChanges().map((user) => user?.uid).distinct();
   @override
   Future<AppResult<void>> login(String email, String password) =>
       _execute(() async {
@@ -27,6 +30,19 @@ class FirebaseAuthRepository implements AuthRepository, SesionActual {
       GoogleAuthProvider.credential(idToken: token),
     );
   }, AuthError.googleAccount);
+  Future<AppResult<void>?> loginWithGooglePopup() async {
+    try {
+      await auth.signInWithPopup(GoogleAuthProvider());
+      return const Success(null);
+    } on FirebaseAuthException catch (error) {
+      return switch (error.code) {
+        'popup-closed-by-user' || 'cancelled-popup-request' => null,
+        'network-request-failed' => const Failure(AuthError.network),
+        _ => const Failure(AuthError.googleOpen),
+      };
+    }
+  }
+
   @override
   Future<AppResult<void>> logout() => _execute(auth.signOut, AuthError.unknown);
   Future<AppResult<void>> _execute(

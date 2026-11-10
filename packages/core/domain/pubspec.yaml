@@ -1,3 +1,4 @@
+resolution: workspace
 name: domain
 description: A starting point for Dart libraries or applications.
 version: 1.0.0
@@ -13,4 +14,3 @@ dependencies:
 
 dev_dependencies:
   lints: ^6.0.0
-  test: ^1.25.6

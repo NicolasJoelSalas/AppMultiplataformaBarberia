@@ -1,16 +1,25 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:collection/collection.dart';
 import 'package:domain/domain.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
+import 'appointment_storage.dart';
+import 'cloudinary_reference.dart';
 
 typedef _Fields = Map<String, dynamic>;
 typedef _Doc = DocumentSnapshot<_Fields>;
 
-class FirestoreBookingRepository implements BookingRepository {
+class FirestoreBookingRepository
+    implements BookingRepository, AppointmentAlertRepository {
   FirestoreBookingRepository(
     this._firestore,
     this._auth, {
     DateTime Function()? now,
+    this._storage,
   }) : _now = now ?? DateTime.now;
 
   static const _server = GetOptions(source: Source.server);
@@ -18,6 +27,7 @@ class FirestoreBookingRepository implements BookingRepository {
   final FirebaseFirestore _firestore;
   final FirebaseAuth _auth;
   final DateTime Function() _now;
+  final SharedPreferences? _storage;
 
   CollectionReference<_Fields> get _barbers =>
       _firestore.collection('barberos');
@@ -119,6 +129,10 @@ class FirestoreBookingRepository implements BookingRepository {
     BookingRequest request, {
     Appointment? original,
   }) => _run((uid) async {
+    final referenceUrl = request.referenceUrl;
+    if (referenceUrl != null && !isCloudinaryReferenceUrl(referenceUrl)) {
+      throw BookingFailure.photoUpload;
+    }
     await _firestore.runTransaction<void>((tx) async {
       _requireUser(uid);
       final turn = _appointments.doc(original?.id ?? request.id);
@@ -127,7 +141,7 @@ class FirestoreBookingRepository implements BookingRepository {
       BookingSlot? previousSlot;
       if (original == null && previous != null) {
         if (previous['ClienteId'] == uid &&
-            AppointmentStatus.fromStored(previous['Estado']) !=
+            decodeAppointmentStatus(previous['Estado']) !=
                 AppointmentStatus.canceled &&
             _matchesRequest(previous, request)) {
           return;
@@ -163,13 +177,7 @@ class FirestoreBookingRepository implements BookingRepository {
 
       final calendar = AgendaCalendar(zone);
       final date = calendar.dateOf(slot.start);
-      final now = _now();
-      final current = calendar.mondayFor(now, 0);
-      final until = current.add(const Duration(days: 14));
-      if (!slot.start.isAfter(now) ||
-          date.isBefore(current) ||
-          !date.isBefore(until) ||
-          date.weekday == DateTime.sunday) {
+      if (!canBookAt(calendar, slot.start, _now())) {
         throw BookingFailure.unavailable;
       }
       final ref = _dayRef(request.barberId, calendar.startOfDay(date));
@@ -239,7 +247,7 @@ class FirestoreBookingRepository implements BookingRepository {
           (previous['ClienteId'] != uid && previous['BarberoId'] != uid)) {
         throw BookingFailure.permission;
       }
-      if (AppointmentStatus.fromStored(previous['Estado']) ==
+      if (decodeAppointmentStatus(previous['Estado']) ==
           AppointmentStatus.canceled) {
         return;
       }
@@ -269,14 +277,15 @@ class FirestoreBookingRepository implements BookingRepository {
   BookingSlot _editable(_Fields previous) {
     final start = _instant(previous['Inicio']);
     final end = _instant(previous['Fin']);
-    if (AppointmentStatus.fromStored(previous['Estado']) !=
-            AppointmentStatus.pending ||
-        start == null ||
-        !start.isAfter(_now()) ||
-        end == null) {
+    if (!canChangeAppointment(
+      decodeAppointmentStatus(previous['Estado']),
+      start,
+      end,
+      _now(),
+    )) {
       throw BookingFailure.notEditable;
     }
-    return BookingSlot(start, end);
+    return BookingSlot(start!, end!);
   }
 
   @override
@@ -290,10 +299,9 @@ class FirestoreBookingRepository implements BookingRepository {
           barber.data()?['Estado'] != true) {
         throw BookingFailure.permission;
       }
-      final status = AppointmentStatus.fromStored(fields['Estado']);
+      final status = decodeAppointmentStatus(fields['Estado']);
       if (status == AppointmentStatus.completed) return;
-      if (status != AppointmentStatus.pending ||
-          _instant(fields['Inicio'])?.isAfter(_now()) != false) {
+      if (!canCompleteAppointment(status, _instant(fields['Inicio']), _now())) {
         throw BookingFailure.notCompletable;
       }
       final serviceId = _text(fields['ServicioId']);
@@ -356,9 +364,10 @@ class FirestoreBookingRepository implements BookingRepository {
   @override
   Stream<List<Appointment>> watchAppointments(AccountRole role) async* {
     final uid = _uid();
-    final roleField = role == AccountRole.barber ? 'BarberoId' : 'ClienteId';
-    yield* _appointments
-        .where(roleField, isEqualTo: uid)
+    final key = 'appointments.${role.name}.$uid';
+    final cached = _readAppointments(key);
+    if (cached != null) yield cached;
+    yield* _appointmentQuery(role, uid)
         .snapshots(includeMetadataChanges: true)
         .where((snapshot) => !snapshot.metadata.hasPendingWrites)
         .asyncMap((snapshot) async {
@@ -381,21 +390,22 @@ class FirestoreBookingRepository implements BookingRepository {
           );
           _requireUser(uid);
 
-          return records.map((doc) {
+          final items = records.map((doc) {
             final record = doc.data();
             final barber = barbers[record['BarberoId']];
             final participant = role == AccountRole.barber
                 ? clients[record['ClienteId']]
                 : barber;
             final zone = barber?['ZonaHoraria'];
+            final reference = record['ReferenciaCorteUrl'];
             return Appointment(
               id: doc.id,
               chargedPriceCents: _priceCents(record['PrecioCobrado']),
               barberId: _text(record['BarberoId']),
               serviceId: _text(record['ServicioId']),
-              referenceUrl: record['ReferenciaCorteUrl'] is String
-                  ? record['ReferenciaCorteUrl'] as String
-                  : null,
+              referenceUrl: reference is String ? reference : null,
+              referenceAvailable:
+                  reference is String && isCloudinaryReferenceUrl(reference),
               serviceName: _text(
                 services[record['ServicioId']]?['NombreCorte'],
               ),
@@ -403,13 +413,131 @@ class FirestoreBookingRepository implements BookingRepository {
               zoneId: zone is String ? zone : null,
               start: _instant(record['Inicio']),
               end: _instant(record['Fin']),
-              status: AppointmentStatus.fromStored(record['Estado']),
+              status: decodeAppointmentStatus(record['Estado']),
             );
           }).toList();
+          await _storeAppointments(key, items);
+          _requireUser(uid);
+          return items;
         })
         .handleError((Object error) {
-          throw _failure(error);
+          final failure = _failure(error);
+          if (failure == BookingFailure.permission) {
+            unawaited(_removeCachedAppointments(key));
+          }
+          throw failure;
         });
+  }
+
+  Query<_Fields> _appointmentQuery(AccountRole role, String uid) =>
+      _appointments.where(
+        role == AccountRole.barber ? 'BarberoId' : 'ClienteId',
+        isEqualTo: uid,
+      );
+
+  @override
+  Stream<void> watchAppointmentAlertChanges(AccountRole role, String uid) =>
+      _appointmentQuery(role, uid)
+          .snapshots(includeMetadataChanges: true)
+          .where(
+            (snapshot) =>
+                !snapshot.metadata.isFromCache &&
+                !snapshot.metadata.hasPendingWrites &&
+                _auth.currentUser?.uid == uid,
+          )
+          .map((_) {});
+
+  @override
+  Future<List<AppointmentAlertRecord>> loadAppointmentAlertRecords(
+    AccountRole role,
+    String uid,
+  ) async {
+    _requireUser(uid);
+    final snapshot = await _appointmentQuery(role, uid).get(_server);
+    _requireUser(uid);
+    if (snapshot.metadata.hasPendingWrites) throw BookingFailure.network;
+    return [
+      for (final doc in snapshot.docs)
+        AppointmentAlertRecord(
+          id: doc.id,
+          clientId: _text(doc.data()['ClienteId']),
+          barberId: _text(doc.data()['BarberoId']),
+          serviceId: _text(doc.data()['ServicioId']),
+          start: _instant(doc.data()['Inicio']),
+          end: _instant(doc.data()['Fin']),
+          status: decodeAppointmentStatus(doc.data()['Estado']),
+          canceledBy: doc.data()['CanceladoPor'] is String
+              ? doc.data()['CanceladoPor'] as String
+              : null,
+          referenceUrl: doc.data()['ReferenciaCorteUrl'] is String
+              ? doc.data()['ReferenciaCorteUrl'] as String
+              : null,
+        ),
+    ];
+  }
+
+  Future<void> _removeCachedAppointments(String key) async {
+    try {
+      await _storage?.remove(key);
+    } on Exception {
+      // Access is still rejected if local storage is unavailable.
+    }
+  }
+
+  List<Appointment>? _readAppointments(String key) {
+    final raw = _storage?.getString(key);
+    if (raw == null) return null;
+    try {
+      return [
+        for (final row in jsonDecode(raw) as List)
+          Appointment(
+            id: row['id'] as String,
+            serviceName: row['serviceName'] as String,
+            participantName: row['participantName'] as String,
+            zoneId: row['zoneId'] as String?,
+            start: DateTime.tryParse(row['start'] as String? ?? ''),
+            end: DateTime.tryParse(row['end'] as String? ?? ''),
+            status: AppointmentStatus.values.byName(row['status'] as String),
+            barberId: row['barberId'] as String,
+            serviceId: row['serviceId'] as String,
+            referenceUrl: row['referenceUrl'] as String?,
+            referenceAvailable: isCloudinaryReferenceUrl(
+              row['referenceUrl'] as String? ?? '',
+            ),
+            chargedPriceCents: row['chargedPriceCents'] as int?,
+          ),
+      ];
+    } on Exception {
+      return null;
+    } on TypeError {
+      return null;
+    }
+  }
+
+  Future<void> _storeAppointments(String key, List<Appointment> items) async {
+    try {
+      final value = jsonEncode([
+        for (final item in items)
+          {
+            'id': item.id,
+            'serviceName': item.serviceName,
+            'participantName': item.participantName,
+            'zoneId': item.zoneId,
+            'start': item.start?.toUtc().toIso8601String(),
+            'end': item.end?.toUtc().toIso8601String(),
+            'status': item.status.name,
+            'barberId': item.barberId,
+            'serviceId': item.serviceId,
+            'referenceUrl': item.referenceUrl,
+            'chargedPriceCents': item.chargedPriceCents,
+          },
+      ]);
+      if (_storage?.getString(key) != value) {
+        await _storage?.setString(key, value);
+      }
+    } on Exception {
+      // A failed local write should not hide a confirmed server result.
+    }
   }
 
   Future<Map<String, _Fields>> _readNames(

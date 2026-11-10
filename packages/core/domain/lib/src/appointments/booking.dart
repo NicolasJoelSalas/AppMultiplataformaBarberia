@@ -154,20 +154,44 @@ class BookingRequest {
   final bool changeReference;
 }
 
-enum AppointmentStatus {
-  pending,
-  canceled,
-  completed,
-  other;
+enum AppointmentStatus { pending, canceled, completed, other }
 
-  static AppointmentStatus fromStored(Object? value) =>
-      switch (value.toString().toLowerCase()) {
-        'true' || 'confirmado' || 'pendiente' => pending,
-        'false' || 'cancelado' || 'cancelada' => canceled,
-        'realizado' || 'completado' => completed,
-        _ => other,
-      };
+bool canChangeAppointment(
+  AppointmentStatus status,
+  DateTime? start,
+  DateTime? end,
+  DateTime now,
+) =>
+    status == AppointmentStatus.pending &&
+    start?.isAfter(now) == true &&
+    end != null;
+
+bool canCompleteAppointment(
+  AppointmentStatus status,
+  DateTime? start,
+  DateTime now,
+) => status == AppointmentStatus.pending && start?.isAfter(now) == false;
+
+bool canBookAt(AgendaCalendar calendar, DateTime start, DateTime now) {
+  final date = calendar.dateOf(start);
+  final current = calendar.mondayFor(now, 0);
+  return start.isAfter(now) &&
+      !date.isBefore(current) &&
+      date.isBefore(current.add(const Duration(days: 14))) &&
+      date.weekday != DateTime.sunday;
 }
+
+bool shouldCancelAfterAgendaChange(
+  AgendaAvailability day,
+  AppointmentStatus status,
+  DateTime start,
+  DateTime end,
+  DateTime now,
+) =>
+    status == AppointmentStatus.pending &&
+    start.isAfter(now) &&
+    day.containsStart(start) &&
+    !day.includes(start, end);
 
 class Appointment {
   const Appointment({
@@ -182,6 +206,7 @@ class Appointment {
     this.serviceId = '',
     this.referenceUrl,
     this.chargedPriceCents,
+    this.referenceAvailable = true,
   });
   final String id;
   final String serviceName;
@@ -195,13 +220,14 @@ class Appointment {
   final String? referenceUrl;
   final int? chargedPriceCents;
 
+  final bool referenceAvailable;
+  String? get visibleReferenceUrl => referenceAvailable ? referenceUrl : null;
+
   bool canChangeAt(DateTime now) =>
-      status == AppointmentStatus.pending &&
-      start?.isAfter(now) == true &&
-      end != null;
+      canChangeAppointment(status, start, end, now);
 
   bool canCompleteAt(DateTime now) =>
-      status == AppointmentStatus.pending && start?.isAfter(now) == false;
+      canCompleteAppointment(status, start, now);
 }
 
 abstract interface class BookingRepository {
@@ -236,15 +262,6 @@ abstract interface class BookingPhotoRepository {
   Future<String> upload(Uint8List image);
 }
 
-bool isBookingReferenceUrl(String value) {
-  final uri = Uri.tryParse(value);
-  return value.length <= 2048 &&
-      value.trim() == value &&
-      uri?.host == 'res.cloudinary.com' &&
-      RegExp(r'^https://res[.]cloudinary[.]com/[^/]+/image/upload/.+$')
-          .hasMatch(value);
-}
-
 class ConfirmBooking {
   const ConfirmBooking(this.repository);
   final BookingRepository repository;
@@ -259,10 +276,6 @@ class ConfirmBooking {
 
   Future<void> call(BookingRequest request, {Appointment? original}) async {
     final name = normalizeName(request.clientName);
-    final url = request.referenceUrl;
-    if (url != null && !isBookingReferenceUrl(url)) {
-      throw BookingFailure.photoUpload;
-    }
     await repository.confirm(
       BookingRequest(
         id: request.id,
@@ -271,7 +284,7 @@ class ConfirmBooking {
         zoneId: request.zoneId,
         slot: request.slot,
         clientName: name,
-        referenceUrl: url,
+        referenceUrl: request.referenceUrl,
         changeReference: request.changeReference,
       ),
       original: original,

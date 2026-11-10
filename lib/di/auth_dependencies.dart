@@ -8,6 +8,10 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../notifications/appointment_alert_controller.dart';
+import '../notifications/appointment_alerts.dart';
+import '../notifications/web_appointment_alerts.dart';
+
 class AuthDependencies {
   const AuthDependencies._(
     this.login,
@@ -16,6 +20,11 @@ class AuthDependencies {
     this.agenda,
     this.booking,
     this.bookingPhotos,
+    this.work,
+    this.locations,
+    this.deviceLocation,
+    this.routes,
+    this.alerts,
   );
 
   final LoginViewModel login;
@@ -24,6 +33,11 @@ class AuthDependencies {
   final AgendaRepository agenda;
   final BookingRepository booking;
   final BookingPhotoRepository bookingPhotos;
+  final WorkRepository work;
+  final ShopLocationRepository locations;
+  final DeviceLocationRepository deviceLocation;
+  final ShopRouteRepository routes;
+  final AppointmentAlerts? alerts;
 
   static Future<AuthDependencies> create(SharedPreferences preferences) async {
     final auth = FirebaseAuthRepository(FirebaseAuth.instance);
@@ -36,9 +50,12 @@ class AuthDependencies {
       login: LoginUseCase(auth),
       register: RegisterUseCase(auth),
       loginWithGoogle: LoginWithGoogleUseCase(auth),
+      googlePopup: kIsWeb ? auth.loginWithGooglePopup : null,
       ensureProfile: EnsureClienteProfileUseCase(clientes),
       logout: LogoutUseCase(auth, auth, clientes),
       initiallyLoggedIn: auth.isLoggedIn,
+      initialUserId: auth.usuarioId,
+      sessionChanges: auth.sessionChanges,
     );
     final services = FirestoreBarberServiceRepository(
       FirebaseFirestore.instance,
@@ -51,18 +68,63 @@ class AuthDependencies {
     final booking = FirestoreBookingRepository(
       FirebaseFirestore.instance,
       FirebaseAuth.instance,
+      storage: preferences,
     );
+    final photos = await _createBookingPhotos();
+    final alerts = await _createAlerts(auth, booking, preferences);
     return AuthDependencies._(
       login,
       clientes,
       services,
       agenda,
       booking,
-      await _createBookingPhotos(),
+      photos,
+      FirestoreWorkRepository(
+        FirebaseFirestore.instance,
+        FirebaseAuth.instance,
+        photos,
+        preferences,
+      ),
+      FirestoreShopLocationRepository(
+        FirebaseFirestore.instance,
+        FirebaseAuth.instance,
+      ),
+      const GeolocatorDeviceLocationRepository(),
+      OsrmShopRouteRepository(
+        Uri.parse(
+          const String.fromEnvironment(
+            'OSRM_BASE_URL',
+            defaultValue: 'https://router.project-osrm.org/',
+          ),
+        ),
+      ),
+      alerts,
     );
   }
 
-  static Future<BookingPhotoRepository> _createBookingPhotos() async {
+  static Future<AppointmentAlerts?> _createAlerts(
+    SesionActual session,
+    AppointmentAlertRepository booking,
+    SharedPreferences preferences,
+  ) async {
+    if (kIsWeb) return WebAppointmentAlerts(session, booking);
+    if (!AppointmentAlertController.supported) return null;
+    final controller = AppointmentAlertController(
+      session,
+      booking,
+      preferences,
+    );
+    try {
+      await controller.initialize();
+      return controller;
+    } catch (_) {
+      controller.dispose();
+      debugPrint('Could not initialize appointment alerts.');
+      return null;
+    }
+  }
+
+  static Future<CloudinaryBookingPhotoRepository> _createBookingPhotos() async {
     const cloudName = String.fromEnvironment('CLOUDINARY_CLOUD_NAME');
     const uploadPreset = String.fromEnvironment('CLOUDINARY_UPLOAD_PRESET');
     const fromDefines = CloudinaryBookingPhotoRepository(

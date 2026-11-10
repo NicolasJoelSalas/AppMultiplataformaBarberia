@@ -13,12 +13,14 @@ class BookingScreen extends StatefulWidget {
     required this.photos,
     required this.initialName,
     this.original,
+    this.initialBarberId,
   });
 
   final BookingRepository repository;
   final BookingPhotoRepository photos;
   final String initialName;
   final Appointment? original;
+  final String? initialBarberId;
 
   @override
   State<BookingScreen> createState() => _BookingScreenState();
@@ -34,8 +36,12 @@ class _BookingScreenState extends State<BookingScreen> {
   @override
   void initState() {
     super.initState();
-    _model = BookingViewModel(widget.repository, widget.photos, widget.original)
-      ..initialize();
+    _model = BookingViewModel(
+      widget.repository,
+      widget.photos,
+      widget.original,
+      initialBarberId: widget.initialBarberId,
+    )..initialize();
   }
 
   @override
@@ -121,6 +127,9 @@ class _BookingScreenState extends State<BookingScreen> {
   Widget build(BuildContext context) {
     final strings = BookingStrings(context);
     final colors = Theme.of(context).colorScheme;
+    final sidePadding =
+        (MediaQuery.sizeOf(context).width - 760).clamp(32.0, double.infinity) /
+        2;
     return ListenableBuilder(
       listenable: _model,
       builder: (context, _) => PopScope(
@@ -142,7 +151,10 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
           bottomNavigationBar: SafeArea(
             top: false,
-            minimum: const EdgeInsets.all(16),
+            minimum: EdgeInsets.symmetric(
+              horizontal: sidePadding,
+              vertical: 16,
+            ),
             child: FilledButton.icon(
               onPressed: _model.slot != null && !_model.busy && !_pickingPhoto
                   ? _confirm
@@ -169,7 +181,10 @@ class _BookingScreenState extends State<BookingScreen> {
             top: false,
             child: ListView(
               controller: _scroll,
-              padding: const EdgeInsets.all(16),
+              padding: EdgeInsets.symmetric(
+                horizontal: sidePadding,
+                vertical: 16,
+              ),
               children: [
                 Text(strings.instructions),
                 if (_model.busy)
@@ -303,7 +318,7 @@ class _BookingScreenState extends State<BookingScreen> {
   Widget _photoArea(BookingStrings strings) {
     final bytes = _model.photoBytes;
     final url = _model.existingPhoto;
-    final hasPhoto = bytes != null || url != null;
+    final hasPhoto = bytes != null || _model.hasExistingPhoto;
     final enabled = !_model.confirming && !_pickingPhoto;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

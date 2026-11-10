@@ -1,3 +1,4 @@
+resolution: workspace
 name: feature_cuenta
 publish_to: none
 version: 0.0.1
@@ -6,6 +7,8 @@ environment:
   sdk: ^3.13.7
 
 dependencies:
+  flutter_map: ^8.3.2
+  latlong2: ^0.9.1
   core_ui:
     path: ../../core/ui
   domain:

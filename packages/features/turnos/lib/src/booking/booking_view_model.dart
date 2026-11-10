@@ -2,12 +2,17 @@ import 'package:domain/domain.dart';
 import 'package:flutter/foundation.dart';
 
 class BookingViewModel extends ChangeNotifier {
-  BookingViewModel(this._repository, this._photos, this._original)
-    : _confirm = ConfirmBooking(_repository);
+  BookingViewModel(
+    this._repository,
+    this._photos,
+    this._original, {
+    this._initialBarberId,
+  }) : _confirm = ConfirmBooking(_repository);
 
   final BookingRepository _repository;
   final BookingPhotoRepository _photos;
   final Appointment? _original;
+  final String? _initialBarberId;
   final ConfirmBooking _confirm;
   List<BookingBarber> barbers = const [];
   List<BookingService> services = const [];
@@ -26,7 +31,10 @@ class BookingViewModel extends ChangeNotifier {
   bool _changeReference = false;
 
   String? get existingPhoto =>
-      _changeReference ? null : _original?.referenceUrl;
+      _changeReference ? null : _original?.visibleReferenceUrl;
+
+  bool get hasExistingPhoto =>
+      !_changeReference && _original?.referenceUrl != null;
 
   bool get busy => loading || confirming;
 
@@ -77,6 +85,13 @@ class BookingViewModel extends ChangeNotifier {
     if (selected == null) {
       return _load(() async {
         barbers = await _repository.loadBarbers();
+        final initial = barbers
+            .where((item) => item.id == _initialBarberId)
+            .firstOrNull;
+        if (initial != null) {
+          barber = initial;
+          services = await _repository.loadServices(initial.id);
+        }
       });
     }
     if (service == null || failure == BookingFailure.serviceChanged) {

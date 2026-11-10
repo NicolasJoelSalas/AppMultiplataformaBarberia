@@ -2,9 +2,11 @@ import 'package:core_ui/core_ui.dart';
 import 'package:domain/domain.dart';
 import 'package:feature_cuenta/feature_cuenta.dart';
 import 'package:feature_turnos/feature_turnos.dart';
+import 'package:feature_trabajos/feature_trabajos.dart';
 import 'package:flutter/material.dart';
 
 import '../app_preferences.dart';
+import '../notifications/appointment_alerts.dart';
 
 enum _Tab {
   home('Inicio', 'Home', Icons.home_outlined, Icons.home),
@@ -36,10 +38,15 @@ class AppShell extends StatefulWidget {
     required this.agenda,
     required this.booking,
     required this.bookingPhotos,
+    required this.work,
+    required this.locations,
+    required this.deviceLocation,
+    required this.routes,
     required this.preferences,
     required this.onLogout,
     required this.loggingOut,
     required this.logoutError,
+    this.alerts,
   });
 
   final ProfileRepository profiles;
@@ -47,16 +54,21 @@ class AppShell extends StatefulWidget {
   final AgendaRepository agenda;
   final BookingRepository booking;
   final BookingPhotoRepository bookingPhotos;
+  final WorkRepository work;
+  final ShopLocationRepository locations;
+  final DeviceLocationRepository deviceLocation;
+  final ShopRouteRepository routes;
   final AppPreferences preferences;
-  final VoidCallback onLogout;
+  final Future<void> Function() onLogout;
   final bool loggingOut;
   final AuthError? logoutError;
+  final AppointmentAlerts? alerts;
 
   @override
   State<AppShell> createState() => _AppShellState();
 }
 
-class _AppShellState extends State<AppShell> {
+class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final MiCuentaViewModel _account;
   AppointmentsViewModel? _appointments;
   final _agendaKey = GlobalKey<AgendaScreenState>();
@@ -64,6 +76,7 @@ class _AppShellState extends State<AppShell> {
   bool _editing = false;
   bool _agendaOpened = false;
   bool _appointmentsOpened = false;
+  bool _closingSession = false;
 
   @override
   void initState() {
@@ -72,6 +85,8 @@ class _AppShellState extends State<AppShell> {
       loadProfile: LoadProfileUseCase(widget.profiles),
       updateName: UpdateProfileNameUseCase(widget.profiles),
     );
+    WidgetsBinding.instance.addObserver(this);
+    widget.alerts?.addListener(_handleAlerts);
     _account.addListener(_syncAppointments);
     _account.load();
   }
@@ -82,11 +97,100 @@ class _AppShellState extends State<AppShell> {
     _appointments?.dispose();
     final model = AppointmentsViewModel(widget.booking, role);
     _appointments = model;
-    if (role == AccountRole.barber || _appointmentsOpened) model.start();
+    model.start();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _startAlerts();
+      _handleAlerts();
+    });
+  }
+
+  void _startAlerts() {
+    final role = _account.profile?.role;
+    if (role != null && !_closingSession) {
+      widget.alerts?.start(role, english: _english);
+    }
+  }
+
+  void _handleAlerts() {
+    final alerts = widget.alerts;
+    if (_account.profile == null || _closingSession || alerts == null) return;
+    if (alerts.takeTap()) _openAppointments();
+    for (final notice in alerts.takeNotices()) {
+      final message = appointmentNoticeSummary(notice, _english);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          action: SnackBarAction(
+            label: _text('Ver turnos', 'View appointments'),
+            onPressed: _openAppointments,
+          ),
+        ),
+      );
+    }
+  }
+
+  void _openAppointments() {
+    if (!mounted || _closingSession) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    setState(() {
+      _tab = _Tab.appointments;
+      _appointmentsOpened = true;
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _startAlerts();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && !_closingSession) {
+      widget.alerts?.refresh();
+    }
+  }
+
+  Future<void> _logout() async {
+    if (_closingSession) return;
+    setState(() => _closingSession = true);
+    ScaffoldMessenger.of(context).clearSnackBars();
+    try {
+      await widget.alerts?.stop();
+      await widget.onLogout();
+    } finally {
+      if (mounted) {
+        setState(() => _closingSession = false);
+        _startAlerts();
+      }
+    }
+  }
+
+  Future<void> _enableAlerts(bool client) async {
+    final allowed = await widget.alerts!.requestPermissions(exact: client);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          allowed
+              ? _text(
+                  'Permisos de avisos habilitados.',
+                  'Notification permissions enabled.',
+                )
+              : _text(
+                  'Revisá los permisos de notificaciones y alarmas en Ajustes.',
+                  'Check notification and alarm permissions in Settings.',
+                ),
+        ),
+      ),
+    );
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    widget.alerts?.removeListener(_handleAlerts);
     _account.removeListener(_syncAppointments);
     _account.dispose();
     _appointments?.dispose();
@@ -120,7 +224,11 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Future<int?> _reserve(AccountProfile profile, {Appointment? original}) async {
+  Future<int?> _reserve(
+    AccountProfile profile, {
+    Appointment? original,
+    String? barberId,
+  }) async {
     final offset = await Navigator.of(context).push<int>(
       MaterialPageRoute(
         builder: (_) => BookingScreen(
@@ -128,6 +236,7 @@ class _AppShellState extends State<AppShell> {
           photos: widget.bookingPhotos,
           initialName: profile.name,
           original: original,
+          initialBarberId: barberId,
         ),
       ),
     );
@@ -137,19 +246,49 @@ class _AppShellState extends State<AppShell> {
     return offset;
   }
 
-  void _openPending(String title) {
+  void _openLocation([String? barberId]) {
     Navigator.of(context).push<void>(
-      MaterialPageRoute(builder: (_) => _PendingScreen(title: title)),
+      MaterialPageRoute(
+        builder: (_) => ShopLocationScreen(
+          locations: widget.locations,
+          device: widget.deviceLocation,
+          barberId: barberId,
+          routes: widget.routes,
+        ),
+      ),
     );
+  }
+
+  Future<void> _reserveFromWork(AccountProfile profile, String barberId) async {
+    final offset = await _reserve(profile, barberId: barberId);
+    if (!mounted || offset == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(_text('Turno reservado.', 'Appointment booked.'))),
+    );
+  }
+
+  void _selectTab(_Tab tab) {
+    if (_account.saving || _agendaKey.currentState?.saving == true) return;
+    FocusManager.instance.primaryFocus?.unfocus();
+    setState(() {
+      _tab = tab;
+      if (tab == _Tab.schedule) _agendaOpened = true;
+      if (tab == _Tab.appointments) {
+        _appointmentsOpened = true;
+        _appointments!.start();
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: _account,
     builder: (context, _) {
-      if (widget.loggingOut || (_account.loading && _account.profile == null)) {
+      if (_closingSession ||
+          widget.loggingOut ||
+          (_account.loading && _account.profile == null)) {
         return _status(
-          widget.loggingOut
+          _closingSession || widget.loggingOut
               ? _text('Cerrando sesión…', 'Signing out…')
               : _text('Cargando tu perfil…', 'Loading your profile…'),
           loading: true,
@@ -171,6 +310,84 @@ class _AppShellState extends State<AppShell> {
           : const [_Tab.home, _Tab.appointments, _Tab.account];
       final activeTab = tabs.contains(_tab) ? _tab : _Tab.home;
       final index = tabs.indexOf(activeTab);
+      final wide = MediaQuery.sizeOf(context).width >= 1000;
+      final tabContent = IndexedStack(
+        index: index,
+        children: [
+          for (final tab in tabs)
+            TickerMode(
+              key: ValueKey(tab),
+              enabled: tab == activeTab,
+              child: tab == _Tab.account
+                  ? MiCuentaScreen(
+                      profile: profile,
+                      editing: _editing,
+                      onEditingChanged: _edit,
+                      darkTheme:
+                          Theme.of(context).brightness == Brightness.dark,
+                      onDarkThemeChanged: widget.preferences.setDarkTheme,
+                      language: widget.preferences.language,
+                      onLanguageChanged: widget.preferences.setLanguage,
+                      onSave: _account.save,
+                      saving: _account.saving,
+                      error: switch (logoutError ?? _account.error) {
+                        final error? => authErrorMessage(
+                          error,
+                          english: _english,
+                        ),
+                        null => null,
+                      },
+                      onLogout: _account.saving ? null : _logout,
+                      onServices: () => Navigator.of(context).push<void>(
+                        MaterialPageRoute(
+                          builder: (_) =>
+                              ServiciosScreen(repository: widget.services),
+                        ),
+                      ),
+                      onLocation: _openLocation,
+                    )
+                  : tab == _Tab.schedule
+                  ? _agendaOpened
+                        ? AgendaScreen(
+                            key: _agendaKey,
+                            repository: widget.agenda,
+                            onBack: _goHome,
+                          )
+                        : const SizedBox.shrink()
+                  : tab == _Tab.appointments
+                  ? _appointmentsOpened
+                        ? AppointmentsScreen(
+                            model: _appointments!,
+                            onDirections: barber ? null : _openLocation,
+                            onEnableAlerts:
+                                widget.alerts?.supportsSystemPermissions != true
+                                ? null
+                                : () => _enableAlerts(!barber),
+                            onReserve: barber ? null : () => _reserve(profile),
+                            onEdit: barber
+                                ? null
+                                : (item) => _reserve(profile, original: item),
+                          )
+                        : const SizedBox.shrink()
+                  : tab == _Tab.home && barber
+                  ? ListenableBuilder(
+                      listenable: _appointments!,
+                      builder: (context, _) => EarningsScreen(
+                        appointments: _appointments!.appointments,
+                        error: _appointments!.error,
+                        onRetry: _appointments!.retry,
+                      ),
+                    )
+                  : WorkScreen(
+                      repository: widget.work,
+                      title: tab.label(_english),
+                      barber: barber,
+                      onReserve: (id) => _reserveFromWork(profile, id),
+                      onDirections: _openLocation,
+                    ),
+            ),
+        ],
+      );
       return PopScope(
         canPop: activeTab == _Tab.home,
         onPopInvokedWithResult: (didPop, _) {
@@ -184,120 +401,61 @@ class _AppShellState extends State<AppShell> {
           }
         },
         child: Scaffold(
-          body: IndexedStack(
-            index: index,
+          body: Row(
             children: [
-              for (final tab in tabs)
-                TickerMode(
-                  key: ValueKey(tab),
-                  enabled: tab == activeTab,
-                  child: tab == _Tab.account
-                      ? MiCuentaScreen(
-                          profile: profile,
-                          editing: _editing,
-                          onEditingChanged: _edit,
-                          darkTheme:
-                              Theme.of(context).brightness == Brightness.dark,
-                          onDarkThemeChanged: widget.preferences.setDarkTheme,
-                          language: widget.preferences.language,
-                          onLanguageChanged: widget.preferences.setLanguage,
-                          onSave: _account.save,
-                          saving: _account.saving,
-                          error: switch (logoutError ?? _account.error) {
-                            final error? => authErrorMessage(
-                              error,
-                              english: _english,
-                            ),
-                            null => null,
-                          },
-                          onLogout: _account.saving ? null : widget.onLogout,
-                          onServices: () => Navigator.of(context).push<void>(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  ServiciosScreen(repository: widget.services),
-                            ),
-                          ),
-                          onLocation: () => _openPending(
-                            _text(
-                              'Ubicación de la barbería',
-                              'Barbershop location',
-                            ),
-                          ),
-                        )
-                      : tab == _Tab.schedule
-                      ? _agendaOpened
-                            ? AgendaScreen(
-                                key: _agendaKey,
-                                repository: widget.agenda,
-                                onBack: _goHome,
-                              )
-                            : const SizedBox.shrink()
-                      : tab == _Tab.appointments
-                      ? _appointmentsOpened
-                            ? AppointmentsScreen(
-                                model: _appointments!,
-                                onReserve: barber
-                                    ? null
-                                    : () => _reserve(profile),
-                                onEdit: barber
-                                    ? null
-                                    : (item) =>
-                                          _reserve(profile, original: item),
-                              )
-                            : const SizedBox.shrink()
-                      : tab == _Tab.home && barber
-                      ? ListenableBuilder(
-                          listenable: _appointments!,
-                          builder: (context, _) => EarningsScreen(
-                            appointments: _appointments!.appointments,
-                            error: _appointments!.error,
-                            onRetry: _appointments!.retry,
-                          ),
-                        )
-                      : _PendingScreen(
-                          title: tab.label(_english),
-                          description: tab == _Tab.home
-                              ? _text(
-                                  'Publicaciones de trabajos',
-                                  'Barbershop posts',
-                                )
-                              : null,
-                        ),
-                ),
+              if (wide) ...[
+                _desktopNavigation(tabs, index),
+                const VerticalDivider(width: 1),
+              ],
+              Expanded(key: const ValueKey('tab-content'), child: tabContent),
             ],
           ),
-          bottomNavigationBar: ListenableBuilder(
-            listenable: _appointments!,
-            builder: (context, _) => NavigationBar(
-              selectedIndex: index,
-              onDestinationSelected: (index) {
-                if (_account.saving ||
-                    _agendaKey.currentState?.saving == true) {
-                  return;
-                }
-                FocusManager.instance.primaryFocus?.unfocus();
-                setState(() {
-                  _tab = tabs[index];
-                  if (_tab == _Tab.schedule) _agendaOpened = true;
-                  if (_tab == _Tab.appointments) {
-                    _appointmentsOpened = true;
-                    _appointments!.start();
-                  }
-                });
-              },
-              destinations: [
-                for (final tab in tabs)
-                  NavigationDestination(
-                    icon: _destinationIcon(tab, tab.icon),
-                    selectedIcon: _destinationIcon(tab, tab.selectedIcon),
-                    label: tab.label(_english),
+          bottomNavigationBar: wide
+              ? null
+              : ListenableBuilder(
+                  listenable: _appointments!,
+                  builder: (context, _) => NavigationBar(
+                    selectedIndex: index,
+                    onDestinationSelected: (index) => _selectTab(tabs[index]),
+                    destinations: [
+                      for (final tab in tabs)
+                        NavigationDestination(
+                          icon: _destinationIcon(tab, tab.icon),
+                          selectedIcon: _destinationIcon(tab, tab.selectedIcon),
+                          label: tab.label(_english),
+                        ),
+                    ],
                   ),
-              ],
-            ),
-          ),
+                ),
         ),
       );
     },
+  );
+
+  Widget _desktopNavigation(List<_Tab> tabs, int index) => ListenableBuilder(
+    listenable: _appointments!,
+    builder: (context, _) => NavigationRail(
+      extended: true,
+      scrollable: true,
+      minExtendedWidth: 200,
+      selectedIndex: index,
+      onDestinationSelected: (index) => _selectTab(tabs[index]),
+      leading: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+        child: Text(
+          'Barber App',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+      ),
+      destinations: [
+        for (final tab in tabs)
+          NavigationRailDestination(
+            icon: _destinationIcon(tab, tab.icon),
+            selectedIcon: _destinationIcon(tab, tab.selectedIcon),
+            label: Text(tab.label(_english)),
+          ),
+      ],
+    ),
   );
 
   Widget _status(String message, {bool loading = false}) => Scaffold(
@@ -319,7 +477,7 @@ class _AppShellState extends State<AppShell> {
                 child: Text(_text('Reintentar', 'Try again')),
               ),
               TextButton(
-                onPressed: widget.onLogout,
+                onPressed: _logout,
                 child: Text(_text('Cerrar sesión', 'Sign out')),
               ),
             ],
@@ -328,43 +486,4 @@ class _AppShellState extends State<AppShell> {
       ),
     ),
   );
-}
-
-class _PendingScreen extends StatelessWidget {
-  const _PendingScreen({required this.title, this.description});
-
-  final String title;
-  final String? description;
-
-  @override
-  Widget build(BuildContext context) {
-    final english = Localizations.localeOf(context).languageCode == 'en';
-    final colors = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(title),
-        backgroundColor: colors.primaryContainer,
-        foregroundColor: colors.onPrimaryContainer,
-      ),
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (description case final label?) ...[
-                Text(
-                  label,
-                  style: Theme.of(context).textTheme.titleLarge,
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 8),
-              ],
-              Text(english ? 'Migration pending' : 'Pendiente de migración'),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
 }

@@ -56,6 +56,7 @@ class LogoutUseCase {
   Future<AppResult<void>> call() async {
     final uid = sesion.usuarioId;
     if (uid != null) await clientes.clearValidatedSession(uid);
+    if (sesion.usuarioId != uid) return const Success(null);
     return auth.logout();
   }
 }

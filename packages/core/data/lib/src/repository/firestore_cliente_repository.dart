@@ -30,15 +30,21 @@ class FirestoreClienteRepository
       await firestore.runTransaction<void>((tx) async {
         final barberSnapshot = await tx.get(barber);
         final clientSnapshot = await tx.get(client);
+        if (auth.currentUser?.uid != user.uid) {
+          throw StateError('The signed-in account changed.');
+        }
         if (!barberSnapshot.exists && !clientSnapshot.exists) {
           final name = user.displayName ?? '';
           tx.set(client, {
-            'Nombre': name.length > 120 ? name.substring(0, 120) : name,
+            'Nombre': initialProfileName(name),
             'Correo': email,
             'CreadoEn': FieldValue.serverTimestamp(),
           });
         }
       });
+      if (auth.currentUser?.uid != user.uid) {
+        return const Failure(AuthError.profileSignin);
+      }
       await preferences.setBool(_key(user.uid), true);
       return const Success(null);
     } catch (_) {

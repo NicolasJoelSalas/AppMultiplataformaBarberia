@@ -14,3 +14,6 @@ export 'src/account/earnings_report.dart';
 export 'src/agenda/agenda.dart';
 export 'src/appointments/booking.dart';
 export 'src/services/barber_service.dart';
+export 'src/work/work_post.dart';
+export 'src/location/shop_location.dart';
+export 'src/appointments/appointment_alerts.dart';

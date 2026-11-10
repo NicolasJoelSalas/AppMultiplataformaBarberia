@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 
-import 'package:domain/domain.dart';
 import 'package:flutter/material.dart';
 
 import 'booking_strings.dart';
@@ -15,7 +14,9 @@ class ReferencePhoto extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final strings = BookingStrings(context);
-    if (bytes == null && (url == null || !isBookingReferenceUrl(url!))) {
+    final source = url == null ? null : Uri.tryParse(url!);
+    if (bytes == null &&
+        (source?.scheme != 'https' || source?.host.isNotEmpty != true)) {
       return Text(strings.photoError);
     }
     return Column(
