@@ -57,8 +57,8 @@ class _EarningsScreenState extends State<EarningsScreen> {
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: Text(_text('Ganancias', 'Earnings')),
-        backgroundColor: theme.scaffoldBackgroundColor,
-        foregroundColor: colors.onSurface,
+        backgroundColor: colors.primaryContainer,
+        foregroundColor: colors.onPrimaryContainer,
       ),
       body: SafeArea(
         top: false,
