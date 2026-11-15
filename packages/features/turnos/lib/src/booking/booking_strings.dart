@@ -58,10 +58,11 @@ class BookingStrings {
       _text('Ver foto de referencia', 'View reference photo');
   String get photoError =>
       _text('No se pudo abrir la foto.', 'Could not open the photo.');
-  String get instructions => _text(
-    'Seleccioná barbero, servicio y un horario disponible de lunes a sábado.',
-    'Choose a barber, a service and an available time from Monday to Saturday.',
-  );
+  String get chooseBarber => _text('Elegí un barbero', 'Choose a barber');
+  String get chooseService => _text('Elegí un servicio', 'Choose a service');
+  String get barberFirst =>
+      _text('Primero elegí un barbero', 'Choose a barber first');
+  String get availableTimes => _text('Horarios disponibles', 'Available times');
   String get barber => _text('Barbero', 'Barber');
   String get client => _text('Cliente', 'Client');
   String get service => _text('Servicio', 'Service');
@@ -92,11 +93,19 @@ class BookingStrings {
   String date(DateTime date) => _material.formatFullDate(date);
 
   String serviceOption(BookingService item) {
-    final name = item.name.isEmpty ? unknownService : item.name;
-    final price = item.priceCents;
-    if (price == null) return '$name · ${item.minutes} min';
-    return '$name · ${_ars(price)} · ${item.minutes} min';
+    final price = servicePrice(item);
+    return [serviceName(item), ?price, serviceDuration(item)].join(' · ');
   }
+
+  String serviceName(BookingService item) =>
+      item.name.isEmpty ? unknownService : item.name;
+
+  String? servicePrice(BookingService item) => switch (item.priceCents) {
+    final price? => _ars(price),
+    null => null,
+  };
+
+  String serviceDuration(BookingService item) => '${item.minutes} min';
 
   String _ars(int cents) {
     final pesos = _material.formatDecimal(cents ~/ 100);

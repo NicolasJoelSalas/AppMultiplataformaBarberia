@@ -1,4 +1,5 @@
 import 'package:domain/domain.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -127,9 +128,13 @@ class _BookingScreenState extends State<BookingScreen> {
   Widget build(BuildContext context) {
     final strings = BookingStrings(context);
     final colors = Theme.of(context).colorScheme;
-    final sidePadding =
-        (MediaQuery.sizeOf(context).width - 760).clamp(32.0, double.infinity) /
-        2;
+    final sidePadding = kIsWeb
+        ? 16.0
+        : (MediaQuery.sizeOf(context).width - 760).clamp(
+                32.0,
+                double.infinity,
+              ) /
+              2;
     return ListenableBuilder(
       listenable: _model,
       builder: (context, _) => PopScope(
@@ -186,12 +191,7 @@ class _BookingScreenState extends State<BookingScreen> {
                 vertical: 16,
               ),
               children: [
-                Text(strings.instructions),
-                if (_model.busy)
-                  const Padding(
-                    padding: EdgeInsets.only(top: 12),
-                    child: LinearProgressIndicator(),
-                  ),
+                if (_model.busy) const LinearProgressIndicator(),
                 if (_model.failure case final failure?) ...[
                   const SizedBox(height: 12),
                   Text(
@@ -213,66 +213,9 @@ class _BookingScreenState extends State<BookingScreen> {
                       ),
                     ),
                 ],
-                const SizedBox(height: 16),
-                DropdownButtonFormField<BookingBarber>(
-                  key: ValueKey(('barber', _model.barber)),
-                  initialValue: _model.barber,
-                  decoration: InputDecoration(
-                    labelText: strings.barber,
-                    border: const OutlineInputBorder(),
-                  ),
-                  isExpanded: true,
-                  items: [
-                    for (final item in _model.barbers)
-                      DropdownMenuItem(
-                        value: item,
-                        child: Text(
-                          item.name.isEmpty ? strings.unknownName : item.name,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                  ],
-                  onChanged: _model.busy || _model.barbers.isEmpty
-                      ? null
-                      : (item) {
-                          if (item != null) _model.selectBarber(item);
-                        },
-                ),
-                if (!_model.busy &&
-                    _model.failure == null &&
-                    _model.barbers.isEmpty)
-                  Text(strings.noBarbers),
-                if (_model.barber != null) ...[
+                if (_model.busy || _model.failure != null)
                   const SizedBox(height: 12),
-                  DropdownButtonFormField<BookingService>(
-                    key: ValueKey(('service', _model.barber, _model.service)),
-                    initialValue: _model.service,
-                    decoration: InputDecoration(
-                      labelText: strings.service,
-                      border: const OutlineInputBorder(),
-                    ),
-                    isExpanded: true,
-                    items: [
-                      for (final item in _model.services)
-                        DropdownMenuItem(
-                          value: item,
-                          child: Text(
-                            strings.serviceOption(item),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: _model.busy || _model.services.isEmpty
-                        ? null
-                        : (item) {
-                            if (item != null) _model.selectService(item);
-                          },
-                  ),
-                  if (!_model.busy &&
-                      _model.failure == null &&
-                      _model.services.isEmpty)
-                    Text(strings.noServices),
-                ],
+                _selections(strings),
                 if (_model.service != null) ...[
                   const SizedBox(height: 12),
                   TextField(
@@ -286,7 +229,15 @@ class _BookingScreenState extends State<BookingScreen> {
                   ),
                   const SizedBox(height: 12),
                   _photoArea(strings),
-                  const SizedBox(height: 12),
+                  const SizedBox(height: 20),
+                  Semantics(
+                    header: true,
+                    child: Text(
+                      strings.availableTimes,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
                   Wrap(
                     spacing: 8,
                     children: [
@@ -312,6 +263,184 @@ class _BookingScreenState extends State<BookingScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _selections(BookingStrings strings) {
+    final barber = _model.barber;
+    final service = _model.service;
+    final showEmpty = !_model.busy && _model.failure == null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 10,
+      children: [
+        _selector(
+          label: strings.barber,
+          icon: Icons.person_outline,
+          value: barber == null ? null : _barberName(barber, strings),
+          placeholder: showEmpty && _model.barbers.isEmpty
+              ? strings.noBarbers
+              : strings.chooseBarber,
+          onTap: _model.busy || _model.barbers.isEmpty
+              ? null
+              : () async {
+                  final selection = await _pickOption(
+                    title: strings.chooseBarber,
+                    options: _model.barbers,
+                    current: barber,
+                    name: (item) => _barberName(item, strings),
+                  );
+                  if (mounted && selection != null && selection != barber) {
+                    await _model.selectBarber(selection);
+                  }
+                },
+        ),
+        _selector(
+          label: strings.service,
+          icon: Icons.content_cut,
+          value: service == null ? null : strings.serviceName(service),
+          details: service == null ? null : _serviceDetails(service, strings),
+          placeholder: barber == null
+              ? strings.barberFirst
+              : showEmpty && _model.services.isEmpty
+              ? strings.noServices
+              : strings.chooseService,
+          onTap: _model.busy || _model.services.isEmpty
+              ? null
+              : () async {
+                  final selection = await _pickOption(
+                    title: strings.chooseService,
+                    options: _model.services,
+                    current: service,
+                    name: strings.serviceName,
+                    details: (item) => _serviceDetails(item, strings),
+                  );
+                  if (mounted && selection != null && selection != service) {
+                    await _model.selectService(selection);
+                  }
+                },
+        ),
+      ],
+    );
+  }
+
+  String _barberName(BookingBarber barber, BookingStrings strings) =>
+      barber.name.isEmpty ? strings.unknownName : barber.name;
+
+  Widget _selector({
+    required String label,
+    required IconData icon,
+    required String? value,
+    required String placeholder,
+    required VoidCallback? onTap,
+    Widget? details,
+  }) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Card.outlined(
+      margin: EdgeInsets.zero,
+      clipBehavior: Clip.antiAlias,
+      color: colors.surfaceContainerLow,
+      child: ListTile(
+        enabled: onTap != null,
+        onTap: onTap,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        leading: CircleAvatar(
+          radius: 19,
+          backgroundColor: colors.secondaryContainer,
+          foregroundColor: colors.onSecondaryContainer,
+          child: Icon(icon, size: 19),
+        ),
+        title: Text(label, style: theme.textTheme.labelLarge),
+        subtitle: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          spacing: 4,
+          children: [
+            Text(
+              value ?? placeholder,
+              style: value == null
+                  ? theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    )
+                  : theme.textTheme.titleMedium,
+            ),
+            ?details,
+          ],
+        ),
+        trailing: onTap == null ? null : const Icon(Icons.expand_more),
+      ),
+    );
+  }
+
+  Future<T?> _pickOption<T extends Object>({
+    required String title,
+    required List<T> options,
+    required T? current,
+    required String Function(T) name,
+    Widget Function(T)? details,
+  }) => showDialog<T>(
+    context: context,
+    builder: (context) {
+      final colors = Theme.of(context).colorScheme;
+      return AlertDialog(
+        title: Text(title),
+        scrollable: true,
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            spacing: 8,
+            children: [
+              for (final option in options)
+                Card.outlined(
+                  margin: EdgeInsets.zero,
+                  clipBehavior: Clip.antiAlias,
+                  child: Semantics(
+                    selected: option == current,
+                    child: ListTile(
+                      selected: option == current,
+                      selectedTileColor: colors.secondaryContainer,
+                      selectedColor: colors.onSecondaryContainer,
+                      title: Text(name(option)),
+                      subtitle: details?.call(option),
+                      trailing: option == current
+                          ? const Icon(Icons.check)
+                          : null,
+                      onTap: () => Navigator.pop(context, option),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(BookingStrings(context).cancel),
+          ),
+        ],
+      );
+    },
+  );
+
+  Widget _serviceDetails(BookingService service, BookingStrings strings) {
+    final theme = Theme.of(context);
+    return Wrap(
+      spacing: 12,
+      runSpacing: 4,
+      children: [
+        if (strings.servicePrice(service) case final price?)
+          Text(
+            price,
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: theme.colorScheme.primary,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        Text(
+          strings.serviceDuration(service),
+          style: theme.textTheme.bodySmall,
+        ),
+      ],
     );
   }
 
@@ -358,12 +487,25 @@ class _BookingScreenState extends State<BookingScreen> {
     if (week.slots.isEmpty) {
       return [
         const SizedBox(height: 12),
-        Text(strings.noTimes),
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: TextButton(
-            onPressed: _model.busy ? null : _model.retry,
-            child: Text(strings.refresh),
+        Card.outlined(
+          margin: EdgeInsets.zero,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: 8,
+              children: [
+                Text(
+                  strings.noTimes,
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                FilledButton.tonalIcon(
+                  onPressed: _model.busy ? null : _model.retry,
+                  icon: const Icon(Icons.refresh),
+                  label: Text(strings.refresh),
+                ),
+              ],
+            ),
           ),
         ),
       ];

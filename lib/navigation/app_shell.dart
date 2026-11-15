@@ -76,6 +76,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   AppointmentsViewModel? _appointments;
   final _agendaKey = GlobalKey<AgendaScreenState>();
   final _accountNavigator = GlobalKey<NavigatorState>();
+  final _bookingNavigators = {
+    _Tab.home: GlobalKey<NavigatorState>(),
+    _Tab.appointments: GlobalKey<NavigatorState>(),
+  };
   _Tab _tab = _Tab.home;
   _AccountPage? _accountPage;
   bool _editing = false;
@@ -213,8 +217,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     AccountProfile profile, {
     Appointment? original,
     String? barberId,
+    _Tab source = _Tab.appointments,
   }) async {
-    final offset = await Navigator.of(context).push<int>(
+    final navigator =
+        _bookingNavigators[source]?.currentState ?? Navigator.of(context);
+    final offset = await navigator.push<int>(
       MaterialPageRoute(
         builder: (_) => BookingScreen(
           repository: widget.booking,
@@ -280,8 +287,36 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  Widget _withBookingNavigator(
+    _Tab tab,
+    _Tab activeTab,
+    bool barber,
+    Widget content,
+  ) {
+    final key = _bookingNavigators[tab];
+    if (!kIsWeb || barber || key == null) return content;
+    final navigator = Navigator(
+      key: key,
+      pages: [MaterialPage<void>(child: content)],
+      // Only imperatively pushed routes can be popped in this navigator.
+      onDidRemovePage: (_) {},
+    );
+    if (tab != _Tab.home) return navigator;
+    return NavigatorPopHandler<Object?>(
+      enabled: activeTab == tab,
+      onPopWithResult: (_) {
+        if (activeTab == tab) key.currentState?.maybePop();
+      },
+      child: navigator,
+    );
+  }
+
   Future<void> _reserveFromWork(AccountProfile profile, String barberId) async {
-    final offset = await _reserve(profile, barberId: barberId);
+    final offset = await _reserve(
+      profile,
+      barberId: barberId,
+      source: _Tab.home,
+    );
     if (!mounted || offset == null) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(content: Text(_text('Turno reservado.', 'Appointment booked.'))),
@@ -339,82 +374,93 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             TickerMode(
               key: ValueKey(tab),
               enabled: tab == activeTab,
-              child: tab == _Tab.account
-                  ? _accountContent(
-                      MiCuentaScreen(
-                        profile: profile,
-                        editing: _editing,
-                        onEditingChanged: _edit,
-                        darkTheme:
-                            Theme.of(context).brightness == Brightness.dark,
-                        onDarkThemeChanged: widget.preferences.setDarkTheme,
-                        language: widget.preferences.language,
-                        onLanguageChanged: widget.preferences.setLanguage,
-                        onSave: _account.save,
-                        saving: _account.saving,
-                        error: switch (logoutError ?? _account.error) {
-                          final error? => authErrorMessage(
-                            error,
-                            english: _english,
-                          ),
-                          null => null,
-                        },
-                        onLogout: _account.saving ? null : _logout,
-                        onServices: () =>
-                            _openAccountPage(_AccountPage.services),
-                        onLocation: () =>
-                            _openAccountPage(_AccountPage.location),
+              child: _withBookingNavigator(
+                tab,
+                activeTab,
+                barber,
+                tab == _Tab.account
+                    ? _accountContent(
+                        MiCuentaScreen(
+                          profile: profile,
+                          editing: _editing,
+                          onEditingChanged: _edit,
+                          darkTheme:
+                              Theme.of(context).brightness == Brightness.dark,
+                          onDarkThemeChanged: widget.preferences.setDarkTheme,
+                          language: widget.preferences.language,
+                          onLanguageChanged: widget.preferences.setLanguage,
+                          onSave: _account.save,
+                          saving: _account.saving,
+                          error: switch (logoutError ?? _account.error) {
+                            final error? => authErrorMessage(
+                              error,
+                              english: _english,
+                            ),
+                            null => null,
+                          },
+                          onLogout: _account.saving ? null : _logout,
+                          onServices: () =>
+                              _openAccountPage(_AccountPage.services),
+                          onLocation: () =>
+                              _openAccountPage(_AccountPage.location),
+                        ),
+                      )
+                    : tab == _Tab.schedule
+                    ? _agendaOpened
+                          ? AgendaScreen(
+                              key: _agendaKey,
+                              repository: widget.agenda,
+                              onBack: _goHome,
+                            )
+                          : const SizedBox.shrink()
+                    : tab == _Tab.appointments
+                    ? _appointmentsOpened
+                          ? AppointmentsScreen(
+                              model: _appointments!,
+                              onDirections: barber ? null : _openLocation,
+                              disabledReminders:
+                                  widget.alerts?.disabledReminders,
+                              onReminderChanged:
+                                  widget.alerts?.setReminderEnabled,
+                              onReserve: barber
+                                  ? null
+                                  : () => _reserve(profile),
+                              onEdit: barber
+                                  ? null
+                                  : (item) => _reserve(profile, original: item),
+                            )
+                          : const SizedBox.shrink()
+                    : tab == _Tab.home && barber
+                    ? ListenableBuilder(
+                        listenable: _appointments!,
+                        builder: (context, _) => EarningsScreen(
+                          appointments: _appointments!.appointments,
+                          error: _appointments!.error,
+                          onRetry: _appointments!.retry,
+                        ),
+                      )
+                    : WorkScreen(
+                        repository: widget.work,
+                        title: tab.label(_english),
+                        barber: barber,
+                        active: tab == activeTab,
+                        onReserve: (id) => _reserveFromWork(profile, id),
+                        onDirections: _openLocation,
                       ),
-                    )
-                  : tab == _Tab.schedule
-                  ? _agendaOpened
-                        ? AgendaScreen(
-                            key: _agendaKey,
-                            repository: widget.agenda,
-                            onBack: _goHome,
-                          )
-                        : const SizedBox.shrink()
-                  : tab == _Tab.appointments
-                  ? _appointmentsOpened
-                        ? AppointmentsScreen(
-                            model: _appointments!,
-                            onDirections: barber ? null : _openLocation,
-                            disabledReminders: widget.alerts?.disabledReminders,
-                            onReminderChanged:
-                                widget.alerts?.setReminderEnabled,
-                            onReserve: barber ? null : () => _reserve(profile),
-                            onEdit: barber
-                                ? null
-                                : (item) => _reserve(profile, original: item),
-                          )
-                        : const SizedBox.shrink()
-                  : tab == _Tab.home && barber
-                  ? ListenableBuilder(
-                      listenable: _appointments!,
-                      builder: (context, _) => EarningsScreen(
-                        appointments: _appointments!.appointments,
-                        error: _appointments!.error,
-                        onRetry: _appointments!.retry,
-                      ),
-                    )
-                  : WorkScreen(
-                      repository: widget.work,
-                      title: tab.label(_english),
-                      barber: barber,
-                      active: tab == activeTab,
-                      onReserve: (id) => _reserveFromWork(profile, id),
-                      onDirections: _openLocation,
-                    ),
+              ),
             ),
         ],
       );
+      final tabNavigator = activeTab == _Tab.account
+          ? _accountNavigator
+          : _bookingNavigators[activeTab];
       return PopScope(
         canPop: activeTab == _Tab.home,
         onPopInvokedWithResult: (didPop, _) {
-          if (didPop || _account.saving) return;
-          final accountNavigator = _accountNavigator.currentState;
-          if (activeTab == _Tab.account && accountNavigator?.canPop() == true) {
-            accountNavigator!.maybePop();
+          if (didPop || _account.saving || activeTab == _Tab.home) return;
+          final navigator = tabNavigator?.currentState;
+          if (navigator?.canPop() == true) {
+            navigator!.maybePop();
           } else if (activeTab == _Tab.account && _editing) {
             _edit(false);
           } else if (activeTab == _Tab.schedule) {
