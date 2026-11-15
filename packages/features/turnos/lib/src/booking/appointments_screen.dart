@@ -329,8 +329,16 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                                   : 'Desactivar recordatorios'),
                       ),
                     ),
-                  TextButton(
+                  OutlinedButton(
                     onPressed: _busy ? null : () => _cancel(item),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: colors.error,
+                      side: BorderSide(
+                        color: _busy
+                            ? colors.error.withValues(alpha: .38)
+                            : colors.error,
+                      ),
+                    ),
                     child: Text(strings.cancelAppointment),
                   ),
                 ],
