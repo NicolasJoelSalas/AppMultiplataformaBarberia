@@ -114,11 +114,7 @@ class AgendaScreenState extends State<AgendaScreen> {
         final publication = _model.publication;
         return Scaffold(
           appBar: AppBar(
-            leading: IconButton(
-              icon: const BackButtonIcon(),
-              tooltip: MaterialLocalizations.of(context).backButtonTooltip,
-              onPressed: _model.saving ? null : requestBack,
-            ),
+            automaticallyImplyLeading: false,
             title: Text(strings.title),
             backgroundColor: colors.primaryContainer,
             foregroundColor: colors.onPrimaryContainer,

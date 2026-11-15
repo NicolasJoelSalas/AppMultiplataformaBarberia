@@ -176,21 +176,11 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   ),
               ],
             ),
-            Wrap(
-              spacing: 8,
-              children: [
-                for (final filter in const [
-                  null,
-                  AppointmentStatus.pending,
-                  AppointmentStatus.canceled,
-                  AppointmentStatus.completed,
-                ])
-                  ChoiceChip(
-                    label: Text(strings.filter(filter)),
-                    selected: _statusFilter == filter,
-                    onSelected: (_) => setState(() => _statusFilter = filter),
-                  ),
-              ],
+            const SizedBox(height: 12),
+            _AppointmentStatusFilter(
+              strings: strings,
+              value: _statusFilter,
+              onChanged: (status) => setState(() => _statusFilter = status),
             ),
             if (error != null) ...[
               const SizedBox(height: 12),
@@ -364,6 +354,110 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
             ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AppointmentStatusFilter extends StatelessWidget {
+  const _AppointmentStatusFilter({
+    required this.strings,
+    required this.value,
+    required this.onChanged,
+  });
+
+  static const _options = <(AppointmentStatus?, IconData)>[
+    (null, Icons.list_alt_outlined),
+    (AppointmentStatus.pending, Icons.schedule_outlined),
+    (AppointmentStatus.canceled, Icons.cancel_outlined),
+    (AppointmentStatus.completed, Icons.check_circle_outline),
+  ];
+
+  final BookingStrings strings;
+  final AppointmentStatus? value;
+  final ValueChanged<AppointmentStatus?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    const gap = 6.0;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Align(
+      alignment: AlignmentDirectional.centerStart,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 620),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: colors.surfaceContainer,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: colors.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(gap),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final textScaler = MediaQuery.textScalerOf(context);
+                final columns =
+                    constraints.maxWidth >= 544 && textScaler.scale(14) <= 18
+                    ? 4
+                    : 2;
+                return Column(
+                  spacing: gap,
+                  children: [
+                    for (
+                      var start = 0;
+                      start < _options.length;
+                      start += columns
+                    )
+                      Row(
+                        spacing: gap,
+                        children: [
+                          for (final (status, icon)
+                              in _options.skip(start).take(columns))
+                            Expanded(child: _option(colors, status, icon)),
+                        ],
+                      ),
+                  ],
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _option(ColorScheme colors, AppointmentStatus? status, IconData icon) {
+    final selected = status == value;
+    return Semantics(
+      selected: selected,
+      child: TextButton(
+        onPressed: () => onChanged(status),
+        style: TextButton.styleFrom(
+          minimumSize: const Size(0, 48),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+          backgroundColor: selected ? colors.primaryContainer : null,
+          foregroundColor: selected
+              ? colors.onPrimaryContainer
+              : colors.onSurfaceVariant,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          spacing: 6,
+          children: [
+            Icon(icon, size: 18),
+            Flexible(
+              child: Text(
+                strings.filter(status),
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ),
           ],
         ),
       ),

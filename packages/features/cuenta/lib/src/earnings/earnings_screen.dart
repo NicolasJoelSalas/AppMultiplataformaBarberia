@@ -57,48 +57,15 @@ class _EarningsScreenState extends State<EarningsScreen> {
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: Text(_text('Ganancias', 'Earnings')),
-        backgroundColor: colors.primaryContainer,
-        foregroundColor: colors.onPrimaryContainer,
+        backgroundColor: theme.scaffoldBackgroundColor,
+        foregroundColor: colors.onSurface,
       ),
       body: SafeArea(
         top: false,
         child: ListView(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
           children: [
-            Text(
-              _text('Reporte de ganancias', 'Earnings report'),
-              style: theme.textTheme.titleLarge,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              _text(
-                'Consultá tus ingresos y servicios realizados.',
-                'Review your earnings and completed services.',
-              ),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: colors.onSurfaceVariant,
-              ),
-            ),
-            const SizedBox(height: 16),
-            SegmentedButton<EarningsPeriod>(
-              segments: [
-                ButtonSegment(
-                  value: EarningsPeriod.week,
-                  label: Text(_text('Semanal', 'Weekly')),
-                ),
-                ButtonSegment(
-                  value: EarningsPeriod.month,
-                  label: Text(_text('Mensual', 'Monthly')),
-                ),
-              ],
-              selected: {_period},
-              onSelectionChanged: (selected) => setState(() {
-                _period = selected.single;
-                _offset = 0;
-              }),
-            ),
-            const SizedBox(height: 12),
-            _periodPicker(report),
+            _filters(report),
             const SizedBox(height: 20),
             if (widget.error case final error?) ...[
               Text(_syncMessage(error), style: TextStyle(color: colors.error)),
@@ -113,41 +80,7 @@ class _EarningsScreenState extends State<EarningsScreen> {
               const Center(child: CircularProgressIndicator()),
             if (appointments != null) ...[
               _summary(report),
-              const SizedBox(height: 12),
-              Text(
-                _text(
-                  'El total suma los importes registrados de servicios realizados según la fecha del turno.',
-                  'The total includes recorded charges for completed services based on the appointment date.',
-                ),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: colors.onSurfaceVariant,
-                ),
-              ),
-              if (report.missingAmount > 0) ...[
-                const SizedBox(height: 16),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: colors.errorContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(14),
-                    child: Text(
-                      _text(
-                        'Turnos sin importe registrado: ${report.missingAmount}. El total es parcial.',
-                        'Appointments without a recorded amount: ${report.missingAmount}. The total is partial.',
-                      ),
-                      style: TextStyle(color: colors.onErrorContainer),
-                    ),
-                  ),
-                ),
-              ],
-              const SizedBox(height: 20),
-              Text(
-                _text('Detalle de servicios', 'Service details'),
-                style: theme.textTheme.titleMedium,
-              ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 24),
               _details(report),
             ],
           ],
@@ -156,19 +89,56 @@ class _EarningsScreenState extends State<EarningsScreen> {
     );
   }
 
+  Widget _filters(EarningsReport report) => LayoutBuilder(
+    builder: (context, constraints) {
+      final segments = SegmentedButton<EarningsPeriod>(
+        segments: [
+          ButtonSegment(
+            value: EarningsPeriod.week,
+            label: Text(_text('Semanal', 'Weekly')),
+          ),
+          ButtonSegment(
+            value: EarningsPeriod.month,
+            label: Text(_text('Mensual', 'Monthly')),
+          ),
+        ],
+        selected: {_period},
+        onSelectionChanged: (selected) => setState(() {
+          _period = selected.single;
+          _offset = 0;
+        }),
+      );
+      final period = _periodPicker(report);
+      if (constraints.maxWidth >= 640) {
+        return Row(
+          spacing: 16,
+          children: [
+            segments,
+            Expanded(child: period),
+          ],
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        spacing: 8,
+        children: [segments, period],
+      );
+    },
+  );
+
   Widget _periodPicker(EarningsReport report) {
+    final theme = Theme.of(context);
     final material = MaterialLocalizations.of(context);
-    final title = _monthly
-        ? material.formatMonthYear(report.from)
-        : _text(
-            'Semana del ${material.formatShortMonthDay(report.from)}',
-            'Week of ${material.formatShortMonthDay(report.from)}',
-          );
+    final from = report.from.year == report.through.year
+        ? material.formatShortMonthDay(report.from)
+        : material.formatShortDate(report.from);
+    final through = material.formatShortMonthDay(report.through);
+    final year = material.formatYear(report.through);
     final current = _offset == 0;
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
-      color: Theme.of(context).colorScheme.surfaceContainer,
+      color: theme.colorScheme.surfaceContainer,
       child: Row(
         children: [
           IconButton(
@@ -181,21 +151,25 @@ class _EarningsScreenState extends State<EarningsScreen> {
           Expanded(
             child: Column(
               children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleSmall,
-                  textAlign: TextAlign.center,
-                ),
-                TextButton(
-                  onPressed: current ? null : () => setState(() => _offset = 0),
+                Padding(
+                  padding: EdgeInsets.symmetric(vertical: current ? 8 : 0),
                   child: Text(
-                    current
-                        ? _text('Período actual', 'Current period')
-                        : _monthly
-                        ? _text('Volver a este mes', 'Back to this month')
-                        : _text('Volver a esta semana', 'Back to this week'),
+                    _monthly
+                        ? material.formatMonthYear(report.from)
+                        : '$from – $through $year',
+                    style: theme.textTheme.titleSmall,
+                    textAlign: TextAlign.center,
                   ),
                 ),
+                if (!current)
+                  TextButton(
+                    onPressed: () => setState(() => _offset = 0),
+                    child: Text(
+                      _monthly
+                          ? _text('Volver a este mes', 'Back to this month')
+                          : _text('Volver a esta semana', 'Back to this week'),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -214,171 +188,200 @@ class _EarningsScreenState extends State<EarningsScreen> {
   Widget _summary(EarningsReport report) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final material = MaterialLocalizations.of(context);
-    final from = material.formatShortDate(report.from);
-    final through = material.formatShortDate(report.through);
-    final count = report.completed.length;
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
       color: colors.primaryContainer,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      child: DefaultTextStyle.merge(
-        style: TextStyle(color: colors.onPrimaryContainer),
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            spacing: 10,
-            children: [
-              Row(
-                spacing: 8,
-                children: [
-                  Icon(
-                    _monthly
-                        ? Icons.calendar_month_outlined
-                        : Icons.date_range_outlined,
-                    size: 20,
-                    color: colors.onPrimaryContainer,
-                  ),
-                  Flexible(
-                    child: Text(
-                      _monthly
-                          ? _text('Ingresos del mes', 'Monthly earnings')
-                          : _text('Ingresos de la semana', 'Weekly earnings'),
-                    ),
-                  ),
-                ],
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          spacing: 8,
+          children: [
+            Text(
+              report.missingAmount == 0
+                  ? _text('Total cobrado', 'Total collected')
+                  : _text('Total parcial', 'Partial total'),
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: colors.onPrimaryContainer,
               ),
+            ),
+            Text(
+              formatArs(context, report.totalCents),
+              style: theme.textTheme.headlineLarge?.copyWith(
+                color: colors.onPrimaryContainer,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            if (report.missingAmount > 0)
               Text(
-                formatArs(context, report.totalCents),
-                style: theme.textTheme.headlineLarge?.copyWith(
+                report.missingAmount == 1
+                    ? _text(
+                        '1 servicio sin importe',
+                        '1 service without an amount',
+                      )
+                    : _text(
+                        '${report.missingAmount} servicios sin importe',
+                        '${report.missingAmount} services without an amount',
+                      ),
+                style: theme.textTheme.bodySmall?.copyWith(
                   color: colors.onPrimaryContainer,
-                  fontWeight: FontWeight.bold,
                 ),
               ),
-              Text(_text('Pesos argentinos (ARS)', 'Argentine pesos (ARS)')),
-              Divider(color: colors.onPrimaryContainer.withValues(alpha: .2)),
-              Text(
-                _text(
-                  'Servicios realizados: $count',
-                  'Completed services: $count',
-                ),
-              ),
-              Text(_text('$from al $through', '$from to $through')),
-            ],
-          ),
+          ],
         ),
       ),
     );
   }
 
   Widget _details(EarningsReport report) {
-    final colors = Theme.of(context).colorScheme;
-    final rows = report.completed;
-    return Card(
-      margin: EdgeInsets.zero,
-      elevation: 0,
-      color: colors.surfaceContainer,
-      child: rows.isEmpty
-          ? Padding(
-              padding: const EdgeInsets.all(24),
-              child: Column(
-                spacing: 10,
-                children: [
-                  Icon(
-                    Icons.receipt_long_outlined,
-                    size: 32,
-                    color: colors.primary,
-                  ),
-                  Text(
-                    _text('Sin servicios realizados', 'No completed services'),
-                  ),
-                  Text(
-                    _text(
-                      'Los servicios que marques como realizados aparecerán en el período correspondiente.',
-                      'Appointments marked completed will appear in their corresponding period.',
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-            )
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final item in rows)
-                  if ((item.chargedPriceCents ?? -1) >= 0) _serviceRow(item),
-                if (report.missingAmount > 0) ...[
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
-                    child: Text(
-                      _text(
-                        'Turnos sin importe',
-                        'Appointments without an amount',
-                      ),
-                      style: Theme.of(context).textTheme.titleSmall,
-                    ),
-                  ),
-                  for (final item in rows)
-                    if ((item.chargedPriceCents ?? -1) < 0) _serviceRow(item),
-                ],
-              ],
-            ),
-    );
-  }
-
-  Widget _serviceRow(Appointment item) {
-    final start = item.start!;
-    final material = MaterialLocalizations.of(context);
-    final minute = _calendar.minuteOfDay(start);
-    final date = material.formatShortMonthDay(_calendar.dateOf(start));
-    final time = material.formatTimeOfDay(
-      TimeOfDay(hour: minute ~/ 60, minute: minute % 60),
-      alwaysUse24HourFormat: true,
-    );
-    final cents = item.chargedPriceCents;
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            spacing: 6,
+    final colors = theme.colorScheme;
+    final material = MaterialLocalizations.of(context);
+    final days = <DateTime, List<Appointment>>{};
+    for (final item in report.completed) {
+      final date = _calendar.dateOf(item.start!);
+      (days[date] ??= []).add(item);
+    }
+    final count = report.completed.length;
+    if (count == 0) {
+      return Card(
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: colors.surfaceContainer,
+        child: Padding(
+          padding: const EdgeInsets.all(20),
+          child: Row(
+            spacing: 12,
             children: [
-              Text(
-                item.participantName.trim().isEmpty
-                    ? _text('Cliente sin nombre', 'Unnamed client')
-                    : item.participantName,
-                style: theme.textTheme.titleSmall,
-              ),
-              Text(
-                item.serviceName.trim().isEmpty
-                    ? _text('Servicio sin asignar', 'Service unavailable')
-                    : item.serviceName,
-              ),
-              Wrap(
-                spacing: 12,
-                children: [
-                  Text('$date · $time'),
-                  Text(
-                    cents == null || cents < 0
-                        ? _text('Sin importe', 'No amount')
-                        : formatArs(context, cents),
-                    style: TextStyle(
-                      color: theme.colorScheme.primary,
-                      fontWeight: FontWeight.bold,
-                    ),
+              Icon(Icons.receipt_long_outlined, color: colors.onSurfaceVariant),
+              Expanded(
+                child: Text(
+                  _text(
+                    'Sin servicios realizados en este período',
+                    'No completed services in this period',
                   ),
-                ],
+                ),
               ),
             ],
           ),
         ),
-        const Divider(height: 1, indent: 16, endIndent: 16),
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      spacing: 12,
+      children: [
+        Semantics(
+          header: true,
+          child: Text(
+            count == 1
+                ? _text('1 servicio realizado', '1 completed service')
+                : _text(
+                    '$count servicios realizados',
+                    '$count completed services',
+                  ),
+            style: theme.textTheme.titleMedium,
+          ),
+        ),
+        for (final day in days.entries)
+          Card(
+            margin: EdgeInsets.zero,
+            elevation: 0,
+            color: colors.surfaceContainer,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: Semantics(
+                    header: true,
+                    child: Text(
+                      material.formatMediumDate(day.key),
+                      style: theme.textTheme.labelLarge?.copyWith(
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
+                for (final (index, item) in day.value.indexed) ...[
+                  if (index > 0)
+                    const Divider(height: 1, indent: 16, endIndent: 16),
+                  _serviceRow(item),
+                ],
+              ],
+            ),
+          ),
       ],
+    );
+  }
+
+  Widget _serviceRow(Appointment item) {
+    final minute = _calendar.minuteOfDay(item.start!);
+    final time = MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay(hour: minute ~/ 60, minute: minute % 60),
+      alwaysUse24HourFormat: true,
+    );
+    final cents = item.chargedPriceCents;
+    final hasAmount = cents != null && cents >= 0;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final client = item.participantName.trim().isEmpty
+        ? _text('Cliente sin nombre', 'Unnamed client')
+        : item.participantName;
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      spacing: 4,
+      children: [
+        Text(
+          item.serviceName.trim().isEmpty
+              ? _text('Servicio sin asignar', 'Service unavailable')
+              : item.serviceName,
+          style: theme.textTheme.titleSmall,
+        ),
+        Text(
+          '$client · $time',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: colors.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+    final amount = Text(
+      hasAmount ? formatArs(context, cents) : _text('Sin importe', 'No amount'),
+      style: theme.textTheme.labelLarge?.copyWith(
+        color: hasAmount ? colors.primary : colors.onSurfaceVariant,
+        fontWeight: FontWeight.w700,
+      ),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          if (constraints.maxWidth < 250 ||
+              MediaQuery.textScalerOf(context).scale(14) > 20) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              spacing: 6,
+              children: [details, amount],
+            );
+          }
+          return Row(
+            spacing: 16,
+            children: [
+              Expanded(flex: 3, child: details),
+              Flexible(
+                flex: 2,
+                child: Align(
+                  alignment: AlignmentDirectional.centerEnd,
+                  child: amount,
+                ),
+              ),
+            ],
+          );
+        },
+      ),
     );
   }
 
