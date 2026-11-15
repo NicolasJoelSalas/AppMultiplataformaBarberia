@@ -31,6 +31,8 @@ enum _Tab {
   String label(bool english) => english ? en : es;
 }
 
+enum _AccountPage { location, services }
+
 class AppShell extends StatefulWidget {
   const AppShell({
     super.key,
@@ -73,7 +75,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   late final MiCuentaViewModel _account;
   AppointmentsViewModel? _appointments;
   final _agendaKey = GlobalKey<AgendaScreenState>();
+  final _accountNavigator = GlobalKey<NavigatorState>();
   _Tab _tab = _Tab.home;
+  _AccountPage? _accountPage;
   bool _editing = false;
   bool _agendaOpened = false;
   bool _appointmentsOpened = false;
@@ -248,15 +252,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _openLocation([String? barberId]) {
-    Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => ShopLocationScreen(
-          locations: widget.locations,
-          device: widget.deviceLocation,
-          barberId: barberId,
-          routes: widget.routes,
-        ),
-      ),
+    Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute(builder: (_) => _locationScreen(barberId)));
+  }
+
+  Widget _locationScreen([String? barberId]) => ShopLocationScreen(
+    locations: widget.locations,
+    device: widget.deviceLocation,
+    barberId: barberId,
+    routes: widget.routes,
+  );
+
+  void _openAccountPage(_AccountPage page) {
+    if (kIsWeb) {
+      setState(() => _accountPage = page);
+      return;
+    }
+    Navigator.of(
+      context,
+    ).push<void>(MaterialPageRoute(builder: (_) => _accountPageContent(page)));
+  }
+
+  Widget _accountPageContent(_AccountPage page) => switch (page) {
+    _AccountPage.location => _locationScreen(),
+    _AccountPage.services => ServiciosScreen(repository: widget.services),
+  };
+
+  Widget _accountContent(Widget account) {
+    if (!kIsWeb) return account;
+    return Navigator(
+      key: _accountNavigator,
+      pages: [
+        MaterialPage<void>(child: account),
+        if (_accountPage case final page?)
+          MaterialPage<void>(
+            key: ValueKey(page),
+            child: _accountPageContent(page),
+          ),
+      ],
+      onDidRemovePage: (page) {
+        final activePage = _accountPage;
+        if (mounted && activePage != null && page.key == ValueKey(activePage)) {
+          setState(() => _accountPage = null);
+        }
+      },
     );
   }
 
@@ -320,32 +360,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               key: ValueKey(tab),
               enabled: tab == activeTab,
               child: tab == _Tab.account
-                  ? MiCuentaScreen(
-                      profile: profile,
-                      editing: _editing,
-                      onEditingChanged: _edit,
-                      darkTheme:
-                          Theme.of(context).brightness == Brightness.dark,
-                      onDarkThemeChanged: widget.preferences.setDarkTheme,
-                      language: widget.preferences.language,
-                      onLanguageChanged: widget.preferences.setLanguage,
-                      onSave: _account.save,
-                      saving: _account.saving,
-                      error: switch (logoutError ?? _account.error) {
-                        final error? => authErrorMessage(
-                          error,
-                          english: _english,
-                        ),
-                        null => null,
-                      },
-                      onLogout: _account.saving ? null : _logout,
-                      onServices: () => Navigator.of(context).push<void>(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              ServiciosScreen(repository: widget.services),
-                        ),
+                  ? _accountContent(
+                      MiCuentaScreen(
+                        profile: profile,
+                        editing: _editing,
+                        onEditingChanged: _edit,
+                        darkTheme:
+                            Theme.of(context).brightness == Brightness.dark,
+                        onDarkThemeChanged: widget.preferences.setDarkTheme,
+                        language: widget.preferences.language,
+                        onLanguageChanged: widget.preferences.setLanguage,
+                        onSave: _account.save,
+                        saving: _account.saving,
+                        error: switch (logoutError ?? _account.error) {
+                          final error? => authErrorMessage(
+                            error,
+                            english: _english,
+                          ),
+                          null => null,
+                        },
+                        onLogout: _account.saving ? null : _logout,
+                        onServices: () =>
+                            _openAccountPage(_AccountPage.services),
+                        onLocation: () =>
+                            _openAccountPage(_AccountPage.location),
                       ),
-                      onLocation: _openLocation,
                     )
                   : tab == _Tab.schedule
                   ? _agendaOpened
@@ -397,7 +436,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         canPop: activeTab == _Tab.home,
         onPopInvokedWithResult: (didPop, _) {
           if (didPop || _account.saving) return;
-          if (activeTab == _Tab.account && _editing) {
+          final accountNavigator = _accountNavigator.currentState;
+          if (activeTab == _Tab.account && accountNavigator?.canPop() == true) {
+            accountNavigator!.maybePop();
+          } else if (activeTab == _Tab.account && _editing) {
             _edit(false);
           } else if (activeTab == _Tab.schedule) {
             _agendaKey.currentState?.requestBack();
