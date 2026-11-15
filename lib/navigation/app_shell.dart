@@ -172,26 +172,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _enableAlerts(bool client) async {
-    final allowed = await widget.alerts!.requestPermissions(exact: client);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          allowed
-              ? _text(
-                  'Permisos de avisos habilitados.',
-                  'Notification permissions enabled.',
-                )
-              : _text(
-                  'Revisá los permisos de notificaciones y alarmas en Ajustes.',
-                  'Check notification and alarm permissions in Settings.',
-                ),
-        ),
-      ),
-    );
-  }
-
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -402,10 +382,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             disabledReminders: widget.alerts?.disabledReminders,
                             onReminderChanged:
                                 widget.alerts?.setReminderEnabled,
-                            onEnableAlerts:
-                                widget.alerts?.supportsSystemPermissions != true
-                                ? null
-                                : () => _enableAlerts(!barber),
                             onReserve: barber ? null : () => _reserve(profile),
                             onEdit: barber
                                 ? null

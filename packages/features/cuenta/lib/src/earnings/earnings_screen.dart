@@ -275,14 +275,35 @@ class _EarningsScreenState extends State<EarningsScreen> {
       children: [
         Semantics(
           header: true,
-          child: Text(
-            count == 1
-                ? _text('1 servicio realizado', '1 completed service')
-                : _text(
-                    '$count servicios realizados',
-                    '$count completed services',
+          child: Row(
+            spacing: 12,
+            children: [
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colors.secondaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(8),
+                  child: Icon(
+                    Icons.receipt_long_outlined,
+                    size: 20,
+                    color: colors.onSecondaryContainer,
                   ),
-            style: theme.textTheme.titleMedium,
+                ),
+              ),
+              Expanded(
+                child: Text(
+                  count == 1
+                      ? _text('1 servicio realizado', '1 completed service')
+                      : _text(
+                          '$count servicios realizados',
+                          '$count completed services',
+                        ),
+                  style: theme.textTheme.titleLarge,
+                ),
+              ),
+            ],
           ),
         ),
         for (final day in days.entries)
@@ -290,17 +311,37 @@ class _EarningsScreenState extends State<EarningsScreen> {
             margin: EdgeInsets.zero,
             elevation: 0,
             color: colors.surfaceContainer,
+            clipBehavior: Clip.antiAlias,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                  child: Semantics(
-                    header: true,
-                    child: Text(
-                      material.formatMediumDate(day.key),
-                      style: theme.textTheme.labelLarge?.copyWith(
-                        color: colors.onSurfaceVariant,
+                Semantics(
+                  header: true,
+                  child: ColoredBox(
+                    color: colors.surfaceContainerHighest,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 16,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        spacing: 8,
+                        children: [
+                          Icon(
+                            Icons.calendar_today_outlined,
+                            size: 16,
+                            color: colors.onSurfaceVariant,
+                          ),
+                          Expanded(
+                            child: Text(
+                              material.formatMediumDate(day.key),
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                color: colors.onSurface,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ),

@@ -12,7 +12,6 @@ class AppointmentsScreen extends StatefulWidget {
     this.onReserve,
     this.onEdit,
     this.onDirections,
-    this.onEnableAlerts,
     this.disabledReminders,
     this.onReminderChanged,
   });
@@ -21,7 +20,6 @@ class AppointmentsScreen extends StatefulWidget {
   final Future<int?> Function()? onReserve;
   final Future<int?> Function(Appointment)? onEdit;
   final ValueChanged<String>? onDirections;
-  final VoidCallback? onEnableAlerts;
   final Set<String>? disabledReminders;
   final Future<void> Function(String appointmentId, bool enabled)?
   onReminderChanged;
@@ -128,16 +126,6 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
       appBar: AppBar(
         automaticallyImplyLeading: false,
         title: Text(barber ? strings.appointments : strings.myAppointments),
-        actions: [
-          if (widget.onEnableAlerts case final enable?)
-            IconButton(
-              onPressed: enable,
-              tooltip: Localizations.localeOf(context).languageCode == 'en'
-                  ? 'Enable appointment alerts'
-                  : 'Activar avisos de turnos',
-              icon: const Icon(Icons.notifications_outlined),
-            ),
-        ],
         backgroundColor: colors.primaryContainer,
         foregroundColor: colors.onPrimaryContainer,
       ),
@@ -239,26 +227,85 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
     final reminderDisabled =
         widget.disabledReminders?.contains(item.id) ?? false;
     final english = Localizations.localeOf(context).languageCode == 'en';
-    final colors = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final participant = item.participantName.isEmpty
+        ? strings.unknownName
+        : item.participantName;
     return Card(
       key: ValueKey(item.id),
       margin: const EdgeInsets.only(top: 12),
+      elevation: 0,
+      color: colors.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: colors.outlineVariant.withValues(alpha: .55)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
-          spacing: 8,
+          spacing: 12,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              item.serviceName.isEmpty
-                  ? strings.unknownService
-                  : item.serviceName,
-              style: Theme.of(context).textTheme.titleLarge,
+            SizedBox(
+              width: double.infinity,
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  Text(
+                    item.serviceName.isEmpty
+                        ? strings.unknownService
+                        : item.serviceName,
+                    style: theme.textTheme.titleLarge,
+                  ),
+                  _statusBadge(item.status, strings),
+                ],
+              ),
             ),
-            Text(
-              '${barber ? strings.client : strings.barber} · ${item.participantName.isEmpty ? strings.unknownName : item.participantName}',
+            _detail(
+              Icons.person_outline,
+              '${barber ? strings.client : strings.barber} · $participant',
+              theme.textTheme.bodyMedium?.copyWith(
+                color: colors.onSurfaceVariant,
+              ),
             ),
-            Text(strings.date(calendar.dateOf(start))),
+            SizedBox(
+              width: double.infinity,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colors.surfaceContainerHigh,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  child: Wrap(
+                    spacing: 20,
+                    runSpacing: 8,
+                    children: [
+                      _detail(
+                        Icons.calendar_today_outlined,
+                        strings.date(calendar.dateOf(start)),
+                        theme.textTheme.bodyMedium,
+                      ),
+                      if (end != null)
+                        _detail(
+                          Icons.schedule_outlined,
+                          strings.interval(calendar, start, end),
+                          theme.textTheme.bodyMedium?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
             if (!barber &&
                 item.barberId.isNotEmpty &&
                 item.canChangeAt(now) &&
@@ -273,17 +320,12 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                       : 'Cómo llegar',
                 ),
               ),
-            if (end != null) Text(strings.interval(calendar, start, end)),
-            Text(
-              strings.status(item.status),
-              style: TextStyle(
-                color: item.status == AppointmentStatus.canceled
-                    ? colors.error
-                    : colors.primary,
-              ),
-            ),
             if (item.chargedPriceCents case final cents? when barber)
-              Text(strings.charged(cents)),
+              _detail(
+                Icons.payments_outlined,
+                strings.charged(cents),
+                theme.textTheme.titleSmall?.copyWith(color: colors.primary),
+              ),
             if (item.referenceUrl != null) ...[
               Text(strings.photo),
               ReferencePhoto(url: item.visibleReferenceUrl),
@@ -355,6 +397,59 @@ class _AppointmentsScreenState extends State<AppointmentsScreen> {
                 ),
             ],
           ],
+        ),
+      ),
+    );
+  }
+
+  Widget _detail(IconData icon, String text, TextStyle? style) => Row(
+    mainAxisSize: MainAxisSize.min,
+    spacing: 8,
+    children: [
+      Icon(icon, size: 16, color: style?.color),
+      Flexible(child: Text(text, style: style)),
+    ],
+  );
+
+  Widget _statusBadge(AppointmentStatus status, BookingStrings strings) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final (icon, background, foreground) = switch (status) {
+      AppointmentStatus.pending => (
+        Icons.schedule_outlined,
+        colors.primaryContainer,
+        colors.onPrimaryContainer,
+      ),
+      AppointmentStatus.canceled => (
+        Icons.cancel_outlined,
+        colors.errorContainer,
+        colors.onErrorContainer,
+      ),
+      AppointmentStatus.completed => (
+        Icons.check_circle_outline,
+        colors.tertiaryContainer,
+        colors.onTertiaryContainer,
+      ),
+      AppointmentStatus.other => (
+        Icons.info_outline,
+        colors.secondaryContainer,
+        colors.onSecondaryContainer,
+      ),
+    };
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: _detail(
+          icon,
+          strings.status(status),
+          theme.textTheme.labelMedium?.copyWith(
+            color: foreground,
+            fontWeight: FontWeight.w700,
+          ),
         ),
       ),
     );
