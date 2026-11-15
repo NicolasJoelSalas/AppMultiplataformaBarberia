@@ -3,6 +3,7 @@ import 'package:domain/domain.dart';
 import 'package:feature_cuenta/feature_cuenta.dart';
 import 'package:feature_turnos/feature_turnos.dart';
 import 'package:feature_trabajos/feature_trabajos.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../app_preferences.dart';
@@ -310,7 +311,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           : const [_Tab.home, _Tab.appointments, _Tab.account];
       final activeTab = tabs.contains(_tab) ? _tab : _Tab.home;
       final index = tabs.indexOf(activeTab);
-      final wide = MediaQuery.sizeOf(context).width >= 1000;
+      final wide = MediaQuery.sizeOf(context).width >= (kIsWeb ? 900 : 1000);
       final tabContent = IndexedStack(
         index: index,
         children: [
@@ -408,10 +409,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           body: Row(
             children: [
               if (wide) ...[
-                _desktopNavigation(tabs, index),
-                const VerticalDivider(width: 1),
+                if (kIsWeb)
+                  _webNavigation(tabs, activeTab)
+                else ...[
+                  _desktopNavigation(tabs, index),
+                  const VerticalDivider(width: 1),
+                ],
               ],
-              Expanded(key: const ValueKey('tab-content'), child: tabContent),
+              Expanded(
+                key: const ValueKey('tab-content'),
+                child: kIsWeb ? _WebContent(child: tabContent) : tabContent,
+              ),
             ],
           ),
           bottomNavigationBar: wide
@@ -431,6 +439,95 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     ],
                   ),
                 ),
+        ),
+      );
+    },
+  );
+
+  Widget _webNavigation(List<_Tab> tabs, _Tab activeTab) => ListenableBuilder(
+    listenable: _appointments!,
+    builder: (context, _) {
+      final theme = Theme.of(context);
+      final colors = theme.colorScheme;
+      final dividerColor = colors.outlineVariant.withValues(alpha: .5);
+      return Material(
+        color: colors.surfaceContainerLowest,
+        shape: Border(right: BorderSide(color: dividerColor)),
+        child: SizedBox(
+          width: 224,
+          child: SafeArea(
+            child: ListView(
+              primary: false,
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 16),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    children: [
+                      ExcludeSemantics(
+                        child: Container(
+                          width: 36,
+                          height: 36,
+                          decoration: BoxDecoration(
+                            color: colors.primary,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Icon(
+                            Icons.content_cut,
+                            size: 19,
+                            color: colors.onPrimary,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          'Barber App',
+                          style: theme.textTheme.titleLarge,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+                Divider(height: 1, color: dividerColor),
+                const SizedBox(height: 16),
+                for (final tab in tabs)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: ListTile(
+                      selected: tab == activeTab,
+                      selectedColor: colors.onPrimaryContainer,
+                      selectedTileColor: colors.primaryContainer,
+                      iconColor: colors.onSurfaceVariant,
+                      textColor: colors.onSurfaceVariant,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                      ),
+                      horizontalTitleGap: 10,
+                      minLeadingWidth: 24,
+                      minTileHeight: 48,
+                      leading: _destinationIcon(
+                        tab,
+                        tab == activeTab ? tab.selectedIcon : tab.icon,
+                      ),
+                      title: Text(
+                        tab.label(_english),
+                        style: TextStyle(
+                          fontWeight: tab == activeTab
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                      ),
+                      onTap: () => _selectTab(tab),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       );
     },
@@ -489,5 +586,44 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         ),
       ),
     ),
+  );
+}
+
+class _WebContent extends StatelessWidget {
+  const _WebContent({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final framed =
+          constraints.maxWidth >= 620 && constraints.maxHeight >= 400;
+      final colors = Theme.of(context).colorScheme;
+      return ColoredBox(
+        color: colors.surfaceContainerLow,
+        child: Padding(
+          padding: framed ? const EdgeInsets.all(24) : EdgeInsets.zero,
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 960),
+              child: Material(
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(framed ? 16 : 0),
+                  side: framed
+                      ? BorderSide(
+                          color: colors.outlineVariant.withValues(alpha: .5),
+                        )
+                      : BorderSide.none,
+                ),
+                clipBehavior: framed ? Clip.antiAlias : Clip.none,
+                child: SizedBox.expand(child: child),
+              ),
+            ),
+          ),
+        ),
+      );
+    },
   );
 }
