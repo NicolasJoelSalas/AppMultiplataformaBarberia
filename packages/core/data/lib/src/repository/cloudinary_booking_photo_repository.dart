@@ -68,43 +68,35 @@ class CloudinaryPhoto {
 }
 
 Future<Uint8List> _prepareJpeg(Uint8List bytes, WorkFraming? framing) async {
-  final buffer = await ui.ImmutableBuffer.fromUint8List(bytes);
+  final codec = await ui.instantiateImageCodecWithSize(
+    await ui.ImmutableBuffer.fromUint8List(bytes),
+    getTargetSize: (width, height) {
+      final maxSide = framing == null ? 1080 : 2048;
+      final scale = math.min(1.0, maxSide / math.max(width, height));
+      return ui.TargetImageSize(
+        width: math.max(1, (width * scale).round()),
+        height: math.max(1, (height * scale).round()),
+      );
+    },
+  );
   try {
-    final descriptor = await ui.ImageDescriptor.encoded(buffer);
+    final frame = (await codec.getNextFrame()).image;
     try {
-      final scale = math.min(
-        1.0,
-        (framing == null ? 1080 : 2048) /
-            math.max(descriptor.width, descriptor.height),
+      final pixels = await frame.toByteData(
+        format: ui.ImageByteFormat.rawStraightRgba,
       );
-      final codec = await descriptor.instantiateCodec(
-        targetWidth: math.max(1, (descriptor.width * scale).round()),
-        targetHeight: math.max(1, (descriptor.height * scale).round()),
-      );
-      try {
-        final frame = (await codec.getNextFrame()).image;
-        try {
-          final pixels = await frame.toByteData(
-            format: ui.ImageByteFormat.rawStraightRgba,
-          );
-          if (pixels == null) throw BookingFailure.photoUpload;
-          return await compute(_encodeJpeg, (
-            pixels.buffer,
-            frame.width,
-            frame.height,
-            framing,
-          ));
-        } finally {
-          frame.dispose();
-        }
-      } finally {
-        codec.dispose();
-      }
+      if (pixels == null) throw BookingFailure.photoUpload;
+      return await compute(_encodeJpeg, (
+        pixels.buffer,
+        frame.width,
+        frame.height,
+        framing,
+      ));
     } finally {
-      descriptor.dispose();
+      frame.dispose();
     }
   } finally {
-    buffer.dispose();
+    codec.dispose();
   }
 }
 
