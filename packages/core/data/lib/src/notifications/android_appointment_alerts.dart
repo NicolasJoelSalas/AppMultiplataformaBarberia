@@ -342,7 +342,7 @@ class AndroidAppointmentAlerts {
     android: AndroidNotificationDetails(
       reminder ? 'appointment_reminders' : 'appointment_updates',
       channel,
-      icon: 'ic_appointment_notice',
+      icon: reminder ? 'ic_turno_reminder' : 'ic_appointment_notice',
       importance: Importance.high,
       priority: Priority.high,
       visibility: NotificationVisibility.private,
