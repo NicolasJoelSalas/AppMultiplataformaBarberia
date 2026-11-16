@@ -1,70 +1,156 @@
-# barberapp
+# Barber App
 
-A new Flutter project.
+Aplicación multiplataforma para conectar clientes y barberos. Permite iniciar sesión, consultar y publicar trabajos, gestionar servicios y agenda, solicitar o administrar turnos y compartir la ubicación de la barbería. El repositorio contiene una app Flutter organizada en paquetes Dart por responsabilidades.
 
-## Getting Started
+## Estado y plataformas
 
-This project is a starting point for a Flutter application.
+- **Android:** plataforma móvil configurada. Incluye autenticación Firebase, notificaciones locales y remotas, ubicación, selección de fotos y persistencia local complementaria.
+- **Web:** aplicación ejecutable en Chrome y Edge. Comparte las cuentas y los datos de Firebase con Android cuando apunta al mismo proyecto. Las notificaciones de turnos funcionan mientras la página está abierta.
+- **iOS y escritorio nativo:** el código Flutter puede servir de base, pero este repositorio no incluye actualmente el proyecto/configuración necesarios para ofrecerlos como plataformas listas para ejecutar.
 
-A few resources to get you started if this is your first Flutter project:
+## Arquitectura
 
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
+La app sigue una arquitectura por capas y módulos. La dirección principal de dependencias es:
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
-# AppMultiplataformaBarberia
+```text
+lib (arranque, composición y navegación)
+  ├── compone features/* con implementaciones de core/*
+  ├── features/* ──────────────┐
+  ├── core/auth ────────────────┼──> core/domain (modelos, contratos y casos de uso)
+  ├── core/data ────────────────┘
+  │      ├── Firebase / Firestore / almacenamiento local / APIs del dispositivo
+  │      └── core/network ──> Cloudinary y OSRM (HTTP)
+  └── core/ui (tema y elementos compartidos)
+```
 
-## Fotos de referencia en Android
+| Capa o paquete | Responsabilidad |
+| --- | --- |
+| `lib/` | Punto de entrada (`main.dart`), configuración de Firebase Web, composición de dependencias, shell de navegación, preferencias y coordinación de avisos. Aquí se conectan las implementaciones concretas con las features. |
+| `packages/core/domain` (`domain`) | Modelos de negocio, contratos de repositorio y casos de uso independientes de Firebase y de la interfaz. Incluye autenticación, perfiles, servicios, agenda, turnos, trabajos, ubicación y recordatorios. |
+| `packages/core/data` (`core_data`) | Adaptadores de persistencia e integración: Firestore, Cloudinary, OSRM, ubicación del dispositivo, cachés locales, borradores y registro de dispositivos para FCM. Implementa los contratos del dominio. |
+| `packages/core/auth` (`core_auth`) | Adaptación de Firebase Authentication y obtención de credenciales de Google. |
+| `packages/core/network` (`network`) | Cliente HTTP compartido para controlar solicitudes, tiempos de espera y descargas. Lo usan los adaptadores de datos para servicios externos. |
+| `packages/core/ui` (`core_ui`) | Tema, idioma, textos compartidos, presentación de errores y recursos visuales reutilizables. |
+| `packages/features/auth` (`feature_auth`) | Inicio, registro, acceso con Google y estado/presentación del flujo de autenticación. |
+| `packages/features/turnos` (`feature_turnos`) | Reserva y consulta de turnos, además de la agenda del barbero. |
+| `packages/features/trabajos` (`feature_trabajos`) | Feed y administración de publicaciones de trabajos. |
+| `packages/features/cuenta` (`feature_cuenta`) | Perfil, servicios, ubicación de la barbería y resumen de ingresos. |
 
-Copiá el nombre de nube y el preset unsigned de Cloudinary que configuraste en Kotlin a `android/local.properties` de Flutter.
+Las features reciben contratos y modelos del dominio; no crean por sí solas los clientes de Firebase. `lib/di/auth_dependencies.dart` crea adaptadores, casos de uso y modelos de presentación y los entrega a `BarberApp` y `AppShell`. Esto permite mantener las reglas de negocio separadas de la interfaz y de los proveedores externos.
+
+### Inicio de la aplicación
+
+1. `lib/main.dart` inicializa Flutter y Firebase. En Web verifica primero que exista la configuración requerida y muestra un error legible si falta.
+2. Carga `SharedPreferences` y llama a `AuthDependencies.create`, que ensambla los repositorios y casos de uso.
+3. Se restaura la sesión de Firebase. Si no hay sesión autenticada se muestra acceso; si hay sesión, se carga el perfil y el rol para habilitar el área correspondiente.
+4. `AppShell` organiza Inicio, Trabajos, Turnos, Agenda y Mi cuenta. Las pantallas delegan las operaciones a sus ViewModels, casos de uso y repositorios.
+5. Los repositorios traducen las operaciones de negocio a Firestore, almacenamiento local o APIs externas. Firebase Rules debe validar permisos en el servidor; el rol usado por la interfaz no reemplaza esa seguridad.
+
+## Funcionalidad y datos
+
+- **Autenticación y perfiles:** Firebase Authentication con correo/contraseña y Google. El perfil se consulta en Firestore; si la cuenta no es un barbero existente, el flujo de autenticación puede crear el perfil de cliente. El cierre de sesión limpia las cachés de la cuenta.
+- **Turnos y agenda:** Firestore es la fuente compartida para barberos, servicios, agenda, disponibilidad y turnos. Las reservas y sus cambios se validan mediante transacciones y comprobaciones de disponibilidad en los repositorios.
+- **Trabajos y fotos:** los metadatos de publicaciones viven en Firestore. Las imágenes se suben a Cloudinary. Al borrar una publicación se quita del feed, pero el archivo alojado en Cloudinary no se elimina automáticamente.
+- **Ubicación y rutas:** la ubicación guardada de la barbería vive en Firestore; la ubicación actual se obtiene con el permiso del dispositivo. El cálculo de rutas usa OSRM y puede apuntar a otro servidor compatible.
+- **Preferencias y caché:** `SharedPreferences` conserva preferencias de idioma/tema y datos auxiliares por cuenta. Android mantiene recordatorios y caché local complementaria; Web guarda preferencias y ejecuta sus recordatorios solo con la página abierta.
+- **Avisos:** Android programa recordatorios locales de turnos y registra el token FCM de barberos habilitados. El envío de avisos remotos requiere un emisor seguro externo (Firebase Admin SDK o FCM HTTP v1); no se envían desde la app cliente. Web no recibe avisos con la página cerrada.
+
+Los adaptadores consultan colecciones Firestore como `clientes`, `barberos`, `servicios`, `turnos` y `publicaciones`, además de subcolecciones de agenda y disponibilidad. La app espera el esquema y las reglas compatibles con el proyecto Firebase existente; este repositorio no contiene reglas ni funciones de servidor para desplegar.
+
+## Requisitos
+
+- Flutter instalado con Dart **3.13.7 o superior**, compatible con la restricción declarada en `pubspec.yaml`.
+- Para Android: Android Studio/SDK y Java 17. El wrapper de Gradle está en `android/gradlew.bat`.
+- Un proyecto Firebase con Authentication y Cloud Firestore configurados. Para Google, habilitá el proveedor y registrá las huellas SHA del certificado Android que uses.
+- Una configuración de Firebase para Android y otra para Web. Ambas pueden usar el mismo proyecto.
+- Cloudinary es opcional para ejecutar sin adjuntar fotos; se necesita su cloud name y un upload preset unsigned para subirlas.
+
+## Preparar la configuración
+
+### Android
+
+Colocá el archivo `google-services.json` correspondiente a tu app Android en `android/app/google-services.json`. En Firebase, la app Android debe usar el `applicationId` `ar.edu.unaj.am.myapplication` definido en `android/app/build.gradle.kts`.
+
+Para habilitar la subida de fotos, agregá estos valores a `android/local.properties` (no los subas al repositorio):
 
 ```properties
 cloudinary.cloudName=TU_CLOUD_NAME
 cloudinary.uploadPreset=TU_UPLOAD_PRESET
 ```
 
-Volvé a compilar la app de Android para aplicar los cambios. También podés indicar ambos valores al ejecutar o compilar Flutter.
+También se pueden pasar al ejecutar o compilar mediante `--dart-define`; esos valores tienen prioridad sobre los locales de Android:
 
 ```powershell
 flutter run --dart-define=CLOUDINARY_CLOUD_NAME=TU_CLOUD_NAME --dart-define=CLOUDINARY_UPLOAD_PRESET=TU_UPLOAD_PRESET
 ```
 
-Los valores indicados con `--dart-define` tienen prioridad. El mismo preset se usa al publicar trabajos. Si falta, podés confirmar reservas y sus cambios sin adjuntar una foto.
+Si no configurás Cloudinary, se pueden usar los flujos que no adjuntan fotos.
 
-## Ejecutar en una computadora
+### Web
 
-La versión Web comparte las cuentas, los turnos y los trabajos con Android cuando ambas usan el mismo proyecto Firebase. En pantallas anchas, la navegación aparece a la izquierda.
+1. Registrá o seleccioná una app Web en **Firebase Console → Configuración del proyecto → Tus apps**.
+2. Copiá `web_config.example.json` a `web_config.local.json` y completá sus siete valores con la configuración Firebase y Cloudinary. El archivo local está ignorado por Git.
+3. Para iniciar con Google, habilitá el proveedor en Firebase Authentication y agregá `localhost` o el dominio publicado a los dominios autorizados.
 
-1. En la consola de Firebase, abrí **Configuración del proyecto → Tus apps**. Elegí la app Web existente o registrá una con el ícono `</>`. Copiá los datos del bloque `firebaseConfig`.
-2. Copiá `web_config.example.json` como `web_config.local.json` y completá los campos con `apiKey`, `appId`, `projectId`, `messagingSenderId` y `authDomain`, en ese orden. Si ya tenés un archivo local preparado, completá los campos vacíos. Para subir fotos, usá el mismo nombre de nube y preset de Cloudinary que en Android.
-3. Para usar **Continuar con Google**, habilitá ese proveedor en Authentication y agregá `localhost` para pruebas o el dominio publicado en **Dominios autorizados**.
-4. Abrí la app en Chrome o Edge.
+La app Web no inicia si faltan los cinco valores Firebase requeridos: `FIREBASE_WEB_API_KEY`, `FIREBASE_WEB_APP_ID`, `FIREBASE_PROJECT_ID`, `FIREBASE_MESSAGING_SENDER_ID` y `FIREBASE_WEB_AUTH_DOMAIN`. Cloudinary es opcional si no se suben fotos.
+
+## Ejecutar
+
+Desde la raíz del repositorio:
+
+```powershell
+flutter pub get
+```
+
+Ejecutar en Android (con un emulador/dispositivo conectado):
+
+```powershell
+flutter devices
+flutter run -d <id-del-dispositivo>
+```
+
+Ejecutar en Chrome o Edge (requiere `web_config.local.json`):
 
 ```powershell
 flutter run -d chrome --dart-define-from-file=web_config.local.json
 flutter run -d edge --dart-define-from-file=web_config.local.json
 ```
 
-Para generar la versión que se sirve desde un sitio HTTPS:
+Crear artefactos de distribución:
 
 ```powershell
+flutter build apk --release
+flutter build appbundle --release
 flutter build web --dart-define-from-file=web_config.local.json
 ```
 
-El navegador permite elegir fotos desde archivos. El GPS depende del permiso de ubicación y de un origen seguro como HTTPS o localhost. Con la app abierta, se pueden consultar los turnos, trabajos y fotos guardados en ese navegador. Los recordatorios y novedades aparecen dentro de la página mientras está abierta. Para recibirlos con el navegador cerrado haría falta habilitar avisos push y programarlos desde un servidor.
+El APK/AAB de release requiere configurar firma de producción en Gradle; el proyecto usa firma de depuración para builds locales. Para apuntar las rutas a otro servicio OSRM, agregá `--dart-define=OSRM_BASE_URL=https://tu-servidor/` a `flutter run` o `flutter build`.
 
-## Mensajes remotos en Android
+## Configuración de servicios y permisos
 
-Al iniciar sesión como barbero habilitado, la app registra el token FCM de la instalación en `barberos/{uid}/dispositivos/{instalacionId}`. Actualiza el registro si cambia el token e intenta desvincularlo al salir. El receptor valida que el mensaje esté dirigido al barbero de la sesión activa. Al tocar el aviso se abre **Turnos**.
+- **Firebase:** habilitá los métodos de acceso que se usarán, crea/valida las colecciones y despliega reglas de Firestore que permitan cada operación según el usuario autenticado. Android usa `google-services.json`; Web usa `web_config.local.json`.
+- **Google Sign-In en Android:** registrá en Firebase las huellas SHA del certificado de depuración o distribución. Las firmas diferentes pueden requerir registros separados.
+- **Cloudinary:** el upload preset unsigned se usa desde el cliente para fotos de reservas y publicaciones. No coloques secretos de administración en la app.
+- **Ubicación:** el sistema pide permiso al usar GPS. En Web, el navegador exige un origen seguro (HTTPS o `localhost`).
+- **Notificaciones Android:** el usuario debe conceder permiso de notificaciones; Android puede requerir habilitar alarmas exactas en Ajustes para respetar horarios precisos. Los mensajes remotos de FCM deben ser solo de datos e incluir `barberoId` y `texto`; opcionalmente `titulo` y `eventoId`.
+- **Notificaciones Web:** recordatorios, cambios y cancelaciones se consultan mientras la página está abierta. Para notificar con el navegador cerrado se requiere implementar push y programación del lado servidor.
 
-El emisor debe usar mensajes FCM de **solo datos** con `barberoId` y `texto`. También puede incluir `titulo` y `eventoId` para identificar el aviso y evitar repeticiones. Con un bloque `notification`, Android puede mostrar el mensaje automáticamente antes de que la app lo valide. El registro del token y el receptor son del lado de la app. El envío requiere un emisor autorizado con Firebase Admin SDK o la API HTTP v1 de FCM.
+## Estructura del repositorio
 
-## Trabajos, ubicación y turnos en Android
+```text
+lib/                         Arranque, composición, navegación y avisos
+packages/core/domain/        Dominio y contratos
+packages/core/data/          Adaptadores y persistencia
+packages/core/auth/          Firebase Authentication y Google
+packages/core/network/       Cliente HTTP
+packages/core/ui/            Tema y componentes compartidos
+packages/features/auth/      Acceso y registro
+packages/features/turnos/    Turnos y agenda
+packages/features/trabajos/  Publicaciones
+packages/features/cuenta/    Perfil, servicios y ubicación
+android/                     Proyecto Android y recursos nativos
+web/                         Entrada, manifest e iconos de la app Web
+```
 
-- **Trabajos.** El barbero publica desde cámara o galería y administra sus publicaciones. El cliente ve el feed en Inicio y abre una reserva con el barbero seleccionado. Firestore usa los mismos campos y reglas del proyecto Kotlin. Al eliminar un trabajo, se retira del feed. Cloudinary conserva el archivo alojado.
-- **Cómo llegar.** El barbero guarda su ubicación desde Mi cuenta. El cliente puede calcular el recorrido desde una publicación o un turno próximo, con el GPS o un punto del mapa. El recorrido usa OSRM. Para usar otro servidor compatible, compilá con `--dart-define=OSRM_BASE_URL=https://tu-servidor/`.
-- **Sin conexión.** Con la sesión iniciada, la app guarda por cuenta la última lista de turnos confirmada por el servidor, junto con las publicaciones y las fotos que terminó de descargar. Abrí la app con conexión para preparar la copia local.
-- **Avisos.** El cliente recibe recordatorios 24 horas y 1 hora antes de los turnos próximos. La app también detecta cambios y cancelaciones mientras está abierta y los consulta periódicamente en segundo plano cuando Android lo permite. Tocá un aviso para abrir Turnos. Podés revisar los permisos de notificaciones y alarmas exactas en Ajustes de Android. Sin el permiso de alarmas exactas, Android puede demorar la entrega.
+Los paquetes internos están declarados como workspace Dart en el `pubspec.yaml` raíz. Sus dependencias locales se resuelven con rutas relativas bajo `packages/`.
+
