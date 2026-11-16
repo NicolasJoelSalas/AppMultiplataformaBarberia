@@ -1,6 +1,6 @@
 resolution: workspace
 name: domain
-description: A starting point for Dart libraries or applications.
+description: Modelos, contratos y casos de uso del negocio de Barber App.
 version: 1.0.0
 # repository: https://github.com/my_org/my_repo
 

@@ -1,7 +1,7 @@
 resolution: workspace
 publish_to: none
 name: core_auth
-description: "A new Flutter package project."
+description: "Adaptadores de autenticación para Firebase y Google."
 version: 0.0.1
 homepage:
 

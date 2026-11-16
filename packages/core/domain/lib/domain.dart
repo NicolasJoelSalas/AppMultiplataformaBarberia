@@ -1,11 +1,5 @@
-/// Support for doing something awesome.
-///
-/// More dartdocs go here.
+/// Modelos, contratos y casos de uso del negocio de Barber App.
 library;
-
-export 'src/domain_base.dart';
-
-// TODO: Export any libraries intended for clients of this package.
 
 export 'src/auth/auth_contracts.dart';
 export 'src/auth/auth_usecases.dart';

@@ -1,7 +1,7 @@
 resolution: workspace
 publish_to: none
 name: feature_auth
-description: "A new Flutter package project."
+description: "Pantallas y estado de presentación de autenticación."
 version: 0.0.1
 homepage:
 
