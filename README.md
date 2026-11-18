@@ -89,34 +89,47 @@ Si no configurás Cloudinary, se pueden usar los flujos que no adjuntan fotos.
 ### Web
 
 1. Registrá o seleccioná una app Web en **Firebase Console → Configuración del proyecto → Tus apps**.
-2. Copiá `web_config.example.json` a `web_config.local.json` y completá sus siete valores con la configuración Firebase y Cloudinary. El archivo local está ignorado por Git.
+2. En este entorno, `web_config.local.json` ya está configurado con los valores de Firebase y Cloudinary. Está ignorado por Git. Para preparar otra copia del proyecto, usá `web_config.example.json` como base.
 3. Para iniciar con Google, habilitá el proveedor en Firebase Authentication y agregá `localhost` o el dominio publicado a los dominios autorizados.
 
 La app Web no inicia si faltan los cinco valores Firebase requeridos: `FIREBASE_WEB_API_KEY`, `FIREBASE_WEB_APP_ID`, `FIREBASE_PROJECT_ID`, `FIREBASE_MESSAGING_SENDER_ID` y `FIREBASE_WEB_AUTH_DOMAIN`. Cloudinary es opcional si no se suben fotos.
 
 ## Ejecutar
 
-Desde la raíz del repositorio:
+Desde la raíz del repositorio, instalá las dependencias.
 
 ```powershell
 flutter pub get
 ```
 
-Ejecutar en Android (con un emulador/dispositivo conectado):
+### Android
+
+Iniciá un emulador o conectá un teléfono con depuración USB habilitada. Consultá los dispositivos disponibles.
 
 ```powershell
 flutter devices
-flutter run -d <id-del-dispositivo>
 ```
 
-Ejecutar en Chrome o Edge (requiere `web_config.local.json`):
+Copiá el identificador de la fila correspondiente a Android y reemplazá `ID_ANDROID` en este comando.
+
+```powershell
+flutter run -d ID_ANDROID
+```
+
+### Web
+
+El archivo `web_config.local.json` ya está configurado en el proyecto local. Ejecutá uno de estos comandos según el navegador que quieras usar. La opción `--dart-define-from-file` carga esa configuración al iniciar la app.
 
 ```powershell
 flutter run -d chrome --dart-define-from-file=web_config.local.json
 flutter run -d edge --dart-define-from-file=web_config.local.json
 ```
 
-Crear artefactos de distribución:
+La opción `-d` selecciona dónde se ejecuta la app. Flutter establece automáticamente `kIsWeb` en `true` al ejecutar en Chrome o Edge, y en `false` al ejecutar en Android. La interfaz también se adapta al ancho disponible para mostrar el menú lateral o la navegación inferior.
+
+### Compilar
+
+Para generar los archivos de distribución, ejecutá el comando de la plataforma correspondiente.
 
 ```powershell
 flutter build apk --release
